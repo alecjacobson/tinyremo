@@ -101,7 +101,6 @@ public:
 
   Var operator-(const Var& other) const
   {
-    assert(tape_ptr == other.tape_ptr);
     return *this + (-other);
   }
 
@@ -131,7 +130,6 @@ public:
 
   Var operator/(const Var& other) const
   {
-    assert(tape_ptr == other.tape_ptr);
     assert(other.value != Scalar(0));
     return *this * other.invert();
   }
@@ -183,7 +181,7 @@ public:
       return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1.0) / (Scalar(2)*sqrt(v.value))), sqrt(v.value));
     }else
     {
-      return Var(std::sqrt(v.value));
+      return Var(sqrt(v.value));
     }
   }
   friend Var sin(const Var& v) {
