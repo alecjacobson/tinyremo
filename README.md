@@ -51,21 +51,27 @@ for (int i = 0; i < x.rows(); ++i)
 For each derivative we wish to take we must create a new `Tape`.
 
 ```cpp
-Tape< double > tape_1;
-Tape< Var<double> > tape_2;
+Tape< double > inner_tape;
+Tape< Var<double> > outer_tape;
+
 // Inner variable
-Var<double> x_inner(&tape_1, tape_1.push_scalar(), 0.5);
+Var<double> x_inner(&inner_tape, inner_tape.push_scalar(), 0.5);
 // Outer variable (we'll actually use this one)
-Var<Var<double>> x(&tape_2, tape_2.push_scalar(), x_inner);
+Var<Var<double>> x(&outer_tape, outer_tape.push_scalar(), x_inner);
 // Construct outer variable in one line
-Var<Var<double>> y(&tape_2, tape_2.push_scalar(), {&tape_1, tape_1.push_scalar(), 4.2});
+Var<Var<double>> y(&outer_tape, outer_tape.push_scalar(), {&inner_tape, inner_tape.push_scalar(), 4.2});
+
 auto z = x * y + sin(x) + pow(x, y) + log(y) + exp(x) + cos(y);
+
+// First derivatives
 auto dzd = z.grad();
 printf("z = %g\n", z.getValue().getValue());
 Var<double> dzdx = dzd[x.getIndex()];
 printf("∂z/∂x = %g\n", dzdx.getValue());
 Var<double> dzdy = dzd[y.getIndex()];
 printf("∂z/∂y = %g\n", dzdy.getValue());
+
+// Second derivatives
 auto d2zdxd = dzdx.grad();
 printf("∂²z/∂x² = %g\n", d2zdxd[x.getValue().getIndex()]);
 printf("∂²z/∂x∂y = %g\n", d2zdxd[y.getValue().getIndex()]);
