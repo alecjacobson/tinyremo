@@ -53,7 +53,11 @@ For each derivative we wish to take we must create a new `Tape`.
 ```cpp
 Tape< double > tape_1;
 Tape< Var<double> > tape_2;
-Var<Var<double>> x(&tape_2, tape_2.push_scalar(), {&tape_1, tape_1.push_scalar(), 0.5});
+// Inner variable
+Var<double> x_inner(&tape_1, tape_1.push_scalar(), 0.5);
+// Outer variable (we'll actually use this one)
+Var<Var<double>> x(&tape_2, tape_2.push_scalar(), x_inner);
+// Construct outer variable in one line
 Var<Var<double>> y(&tape_2, tape_2.push_scalar(), {&tape_1, tape_1.push_scalar(), 4.2});
 auto z = x * y + sin(x) + pow(x, y) + log(y) + exp(x) + cos(y);
 auto dzd = z.grad();
