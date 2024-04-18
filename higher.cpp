@@ -1,6 +1,9 @@
 #include "tinyremo.h"
 
 #include <iostream>
+#include <Eigen/Core>
+#include <Eigen/Cholesky>
+
 int main() {
   // Some simple tests with first derivatives
   {
@@ -47,6 +50,43 @@ int main() {
     auto d2zdyd = dzdy.grad();
     printf("∂²z/∂y∂x = %g\n", d2zdyd[x.getValue().getIndex()]);
     printf("∂²z/∂y² = %g\n", d2zdyd[y.getValue().getIndex()]);
+  }
+
+  // Second derivatives with Eigen
+  {
+    printf("Second derivatives with Eigen\n");
+    Tape< double > tape_1;
+    Tape< Var<double> > tape_2;
+    const int N = 2;
+    Eigen::Matrix<Var<Var<double>>, N, 1> x;
+    for (int i = 0; i < x.rows(); ++i) 
+    {
+      x(i) = Var<Var<double>>(&tape_2, tape_2.push_scalar(), {&tape_1, tape_1.push_scalar(), i+1});
+    }
+    Eigen::Matrix<Var<Var<double>>, N, N> A;
+    for (int i = 0; i < A.rows(); ++i) 
+    {
+      for (int j = 0; j < A.cols(); ++j) 
+      {
+        A(i,j) = x(i) + x(j);
+      }
+      A(i,i) = A(i,i)+A(i,i);
+    }
+    Eigen::Matrix<Var<Var<double>>, N, 1> b = A.llt().solve(x);
+    Var<Var<double>> y = b.array().square().sum();
+    auto dyd = y.grad();
+    for (int i = 0; i < N; ++i) 
+    {
+      printf("∂y/∂x(%d) = %g\n", i, dyd[x(i).getIndex()].getValue());
+    }
+    for (int i = 0; i < N; ++i) 
+    {
+      auto d2ydxi = dyd[x(i).getIndex()].grad();
+      for (int j = 0; j < N; ++j) 
+      {
+        printf("∂²y/∂x(%d)∂x(%d) = %g\n", i, j, d2ydxi[x(j).getValue().getIndex()]);
+      }
+    }
   }
 
 }
