@@ -12,7 +12,6 @@ namespace Eigen
   {
     typedef tinyremo::Var<T> Real;
     typedef tinyremo::Var<T> Literal;
-
     enum {
       IsComplex = NumTraits<T>::IsComplex,
       IsInteger = 0,
@@ -162,7 +161,7 @@ namespace tinyremo
     const FType & F,
     Matrices &... matrices)
   {
-    std::map<size_t,size_t> col;
+    index_map<size_t,size_t> col;
     int index = 0;
     auto collect_all_indices = [&index,&col](auto& X) 
     {
@@ -202,7 +201,7 @@ namespace tinyremo
     // Dense gradient
     auto df_d_raw = f.grad();
     std::vector<size_t> outer_row(max_index(matrices...));
-    std::map<size_t,size_t> inner_col;
+    index_map<size_t,size_t> inner_col;
     int index = 0;
     auto collect_indices = [&](auto& X) 
     {
