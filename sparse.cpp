@@ -1,4 +1,5 @@
 #include "tinyremo.h"
+#include "tinyremo_eigen.h"
 #include <Eigen/Core>
 #include <Eigen/Sparse>
 #include <iostream>

@@ -1,4 +1,5 @@
 // Copyright (C) 2024 Alec Jacobson <alecjacobson@gmail.com>
+#pragma once
 #include <cmath>
 #include <memory>
 #include <vector>
@@ -74,6 +75,11 @@ public:
   // Construct for a tracked variable
   Var(Tape<Scalar>* tape_ptr, size_t index, const Scalar & value) :
     tape_ptr(tape_ptr), index(index), value(value) {}
+  
+  // Constructor for scalar types (e.g., int, double), but not for Var types.
+  // SFINAE is used to enable this constructor only for scalar types.
+  template<typename T, typename = typename std::enable_if<std::is_scalar<T>::value>::type>
+  constexpr explicit Var(T v) : tape_ptr(nullptr), index(0), value(v) { }
 
   Var operator+(const Var& other) const
   {
@@ -178,7 +184,7 @@ public:
     using std::sqrt;
     if(v.tape_ptr)
     {
-      return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1.0) / (Scalar(2)*sqrt(v.value))), sqrt(v.value));
+      return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / (Scalar(2)*sqrt(v.value))), sqrt(v.value));
     }else
     {
       return Var(sqrt(v.value));
@@ -299,4 +305,3 @@ private:
   size_t index;
   Scalar value;
 };
-
