@@ -140,8 +140,8 @@ namespace tinyremo
     bool operator<=(const Var& other) const { return value <= other.value; }
     bool operator==(const Var& other) const { return value == other.value; }
 
-    // Eigen will call `sqrt(x(i))` for `Eigen::Matrix<Var,…> x;`
-    friend Var sqrt(const Var& v) {
+    friend Var sqrt(const Var& v)
+    {
       using std::sqrt;
       if(v.tape_ptr)
       {
@@ -151,7 +151,8 @@ namespace tinyremo
         return Var(sqrt(v.value));
       }
     }
-    friend Var sin(const Var& v) {
+    friend Var sin(const Var& v)
+    {
       using std::cos;
       using std::sin;
       if(v.tape_ptr)
@@ -162,7 +163,8 @@ namespace tinyremo
         return Var(sin(v.value));
       }
     }
-    friend Var cos(const Var& v) {
+    friend Var cos(const Var& v)
+    {
       using std::cos;
       using std::sin;
       if(v.tape_ptr)
@@ -173,7 +175,7 @@ namespace tinyremo
         return Var(cos(v.value));
       }
     }
-    friend Var exp(const Var& v) {
+    friend Var exp(const Var& v){
       using std::exp;
       if(v.tape_ptr)
       {
@@ -183,7 +185,8 @@ namespace tinyremo
         return Var(exp(v.value));
       }
     }
-    friend Var log(const Var& v) {
+    friend Var log(const Var& v)
+    {
       using std::log;
       if(v.tape_ptr)
       {
@@ -193,7 +196,8 @@ namespace tinyremo
         return Var(log(v.value));
       }
     }
-    friend Var pow(const Var& x, const Var& p) {
+    friend Var pow(const Var& x, const Var& p)
+    {
       using std::pow;
       // Mirror operator+ above
       if(x.tape_ptr)
@@ -215,6 +219,17 @@ namespace tinyremo
         {
           return Var(pow(x.value, p.value));
         }
+      }
+    }
+    friend Var abs(const Var& v)
+    {
+      using std::abs;
+      if(v.tape_ptr)
+      {
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, v.value < Scalar(0) ? Scalar(-1) : Scalar(1)), abs(v.value));
+      }else
+      {
+        return Var(abs(v.value));
       }
     }
 
