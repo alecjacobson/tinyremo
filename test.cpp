@@ -1,5 +1,6 @@
 #include "tinyremo.h"
 
+using namespace tinyremo;
 // tictoc function to return time since last call in seconds
 #include <chrono>
 double tictoc()
