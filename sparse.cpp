@@ -4,10 +4,12 @@
 #include <Eigen/Sparse>
 #include <iostream>
 
-template <typename Scalar>
-Scalar spring_energy(const Eigen::Matrix<Scalar, Eigen::Dynamic, 2>& X, const Eigen::MatrixXi& E, const double l_rest)
+using namespace tinyremo;
+template <typename Scalar> 
+Eigen::Matrix<Scalar,Eigen::Dynamic,1> spring_residuals(
+    const Eigen::Matrix<Scalar, Eigen::Dynamic, 2>& X, const Eigen::MatrixXi& E, const double l_rest)
 {
-  Scalar f = Scalar(0);
+  Eigen::Matrix<Scalar,Eigen::Dynamic,1> f(E.rows());
   for(int e = 0; e < E.rows(); ++e)
   {
     const auto& i = E(e,0);
@@ -16,30 +18,32 @@ Scalar spring_energy(const Eigen::Matrix<Scalar, Eigen::Dynamic, 2>& X, const Ei
     const auto& x_j = X.row(j);
     const auto& d_ij = x_i - x_j;
     const auto& l_ij = d_ij.norm();
-    const auto& diff = l_ij - Scalar(l_rest);
-    f += Scalar(0.5)*diff*diff;
+    f(e) = l_ij - Scalar(l_rest);
   }
   return f;
+}
+
+template <typename Scalar>
+Scalar spring_energy(const Eigen::Matrix<Scalar, Eigen::Dynamic, 2>& X, const Eigen::MatrixXi& E, const double l_rest)
+{
+  return Scalar(0.5) * spring_residuals(X,E,l_rest).squaredNorm();
 }
 
 template <int M, int N, bool print = false>
 void mass_spring_sparse_hessian()
 {
-  Tape<double> tape_1;
-  Tape<Var<double>> tape_2;
   // Spring mass positions
-  Eigen::Matrix<Var<Var<double>>, Eigen::Dynamic, 2> X(M*N,2);
+  Eigen::Matrix<double, Eigen::Dynamic, 2> X_double(M*N,2);
   for(int i = 0; i < M; ++i)
   {
     for(int j = 0; j < N; ++j)
     {
-      X(i*N+j,0) = Var<Var<double>>(&tape_2, tape_2.push_scalar(), {&tape_1, tape_1.push_scalar(), i});
-      X(i*N+j,1) = Var<Var<double>>(&tape_2, tape_2.push_scalar(), {&tape_1, tape_1.push_scalar(), j});
+      X_double(i*N+j,0) = i;
+      X_double(i*N+j,1) = j;
     }
   }
   // Spring rest length
   const double l_rest = 2.0;
-
   // Grid of spring edges
   Eigen::MatrixXi E(M*(N-1)+(M-1)*N,2);
   {
@@ -60,49 +64,27 @@ void mass_spring_sparse_hessian()
     }
   }
 
+  Tape<double> tape_1;
+  Tape<Var<double>> tape_2;
+  // Copy from double to Var<Var<double>> and record on tapes
+  Eigen::Matrix<Var<Var<double>>, Eigen::Dynamic, 2> X = record_matrix(X_double, tape_1, tape_2);
+  
   Var<Var<double>> f = spring_energy(X, E, l_rest);
-
   // Dense first derivatives because we know that they're dense and that every
   // row of Hessian has at least one entry.
   auto df_d = f.grad();
-
-  // We need to map X's elements' inner indices to indices in the rows/cols of
-  // the Hessian. We'll use column major order here.
-  std::map<size_t,size_t> outer_row,inner_col;
-  for(int j = 0; j < X.cols(); ++j)
-  {
-    for(int i = 0; i < X.rows(); ++i)
-    {
-      inner_col[X(i,j).getValue().getIndex()] = X.rows()*j + i;
-      outer_row[X(i,j).getIndex()] = X.rows()*j + i;
-    }
-  }
-
-  // Collect sparse second derivatives
-  std::vector<Eigen::Triplet<double>> triplets;
-  for(int i = 0; i < X.rows(); ++i)
-  {
-    for(int j = 0;j < X.cols(); ++j)
-    {
-      auto d2f_dijd = df_d[X(i,j).getIndex()].sparse_grad();
-      size_t outer_row_ij = outer_row[X(i,j).getIndex()];
-      for(auto& [index, value] : d2f_dijd)
-      {
-        //size_t inner_col_ij = inner_col[key];
-        if(inner_col.find(index) != inner_col.end())
-        {
-          size_t inner_col_ij = inner_col[index];
-          triplets.emplace_back(outer_row_ij, inner_col_ij, value);
-        }
-      }
-    }
-  }
-
-  Eigen::SparseMatrix<double> H(X.size(),X.size());
-  H.setFromTriplets(triplets.begin(),triplets.end());
+  auto H = sparse_hessian(f, X);
 
   if constexpr(print)
   {
+    // If we're printing then let's also check the Jacobian
+    // It's not required, but since Jacobian only needs first derivatives, let's
+    // stip off the outer layer. This way J will contain doubles instead of
+    // Var<double>.
+    auto X_lower = X.unaryExpr([](const Var<Var<double>>& x){return x.getValue();}).eval();
+    auto F = spring_residuals(X_lower,E,l_rest);
+    auto J = sparse_jacobian(F,X_lower);
+
     // Print matlab friendly variables
     std::cout<<"X=["<<std::endl;
     for(int i = 0; i < X.rows(); ++i)
@@ -127,15 +109,20 @@ void mass_spring_sparse_hessian()
     }
     std::cout<<"];"<<std::endl;
 
-    std::cout<<"H=sparse("<<H.rows()<<","<<H.cols()<<");"<<std::endl;
-    for(int k = 0; k < H.outerSize(); ++k)
+    const auto print_sparse_matrix = [](const Eigen::SparseMatrix<double>& A, const std::string name)
     {
-      for(Eigen::SparseMatrix<double>::InnerIterator it(H,k); it; ++it)
+      std::cout<<name<<" = sparse("<<A.rows()<<","<<A.cols()<<");"<<std::endl;
+      for(int k = 0; k < A.outerSize(); ++k)
       {
-        std::cout<<"H("<<it.row()+1<<","<<it.col()+1<<")="<<it.value()<<";"<<" ";
+        for(Eigen::SparseMatrix<double>::InnerIterator it(A,k); it; ++it)
+        {
+          std::cout<<name<<"("<<it.row()+1<<","<<it.col()+1<<")="<<it.value()<<";"<<" ";
+        }
+        std::cout<<std::endl;
       }
-      std::cout<<std::endl;
-    }
+    };
+    print_sparse_matrix(J,"J");
+    print_sparse_matrix(H,"H");
     std::cout<<"% plot using gptoolbox"<<std::endl;
     std::cout<<"% tsurf(E,X);hold on;qvr(X,reshape((1e-10*speye(size(H)) + H)\\df_dX(:),size(X)));hold off;"<<std::endl;
   }
@@ -179,8 +166,8 @@ int main()
 {
   // 2D mass-springs
   {
-    const int M = 3;
-    const int N = 2;
+    const int M = 5;
+    const int N = 4;
     std::cout<<"# 2D mass-spring system with "<<M<<"x"<<N<<" grid"<<std::endl;
     mass_spring_sparse_hessian<M,N,true>();
   }

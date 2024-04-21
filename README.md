@@ -19,6 +19,8 @@ Variables for which derivatives are required must be registered with a common `T
 #include "tinyremo.h"
 int main()
 {
+  using namespace tinyremo;
+
   Tape<double> tape;
 
   Var<double> x(&tape, tape.push_scalar(), 0.5);
