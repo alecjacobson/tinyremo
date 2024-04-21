@@ -11,7 +11,7 @@ clang++ -std=c++20 -I . -I [path/to/eigen] -I -o test test.cpp
 ./test
 ```
 
-## Simple example
+## Gradient of a function of scalar variables
 
 ```cpp
 #include "tinyremo.h"
