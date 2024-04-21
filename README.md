@@ -2,7 +2,7 @@
 
 Tiny header-only, minimal dependency reverse-mode automatic differentiation library for C++.
 
-Based on the tape-based implmenetation tutorial at https://rufflewind.com/2016-12-30/reverse-mode-automatic-differentiation
+Based on the tape-based rust implementation in the tutorial at https://rufflewind.com/2016-12-30/reverse-mode-automatic-differentiation
 
 ## Compile and Run Tests
 
