@@ -107,7 +107,6 @@ int main() {
     Tape< Var<double> > tape_2;
     Var<Var<double>> x(&tape_2, tape_2.push_scalar(), {&tape_1, tape_1.push_scalar(), 0.5});
     Var<Var<double>> y(&tape_2, tape_2.push_scalar(), {&tape_1, tape_1.push_scalar(), 4.2});
-    //Var<Var<double>> z = x/y;
     auto z = x * y + sin(x) + pow(x, y) + log(y) + exp(x) + cos(y);
     auto dzd = z.grad();
     printf("z = %g\n", z.getValue().getValue());
