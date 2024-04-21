@@ -36,6 +36,7 @@ int main()
 }
 ```
 
+
 ## As a custom scalar type for Eigen matrices
 
 ```cpp
@@ -80,4 +81,82 @@ printf("∂²z/∂x∂y = %g\n", d2zdxd[y.getValue().getIndex()]);
 auto d2zdyd = dzdy.grad();
 printf("∂²z/∂y∂x = %g\n", d2zdyd[x.getValue().getIndex()]);
 printf("∂²z/∂y² = %g\n", d2zdyd[y.getValue().getIndex()]);
+```
+
+## Easier construction of recorded variables
+
+Call `record_scalar` to record a value on a bunch of tapes (in order) to create
+appropriately nested `Var` object in one line. In this case, `x` will be a
+twice-differentiable `Var<Var<double>>`.
+
+```cpp
+Tape<double> tape_1;
+Tape<Var<double>> tape_2;
+auto x = record_scalar(0.5,tape_1,tape_2);
+```
+
+Similarly, for Eigen matrices, `record_matrix` will copy `double` values from a
+matrix and record them on a bunch of tapes in order to create a matrix of `Var`
+objects. In this case, `Y` will be a twice-differentiable
+`Eigen::Matrix<Var<Var<double>>,Eigen::Dynamic,Eigen::Dynamic>`.
+
+```cpp
+Eigen::MatrixXd X = Eigen::MatrixXd::Random(3, 3);
+Tape<double> tape_1;
+Tape<Var<double>> tape_2;
+auto Y = record_matrix(X,tape_1,tape_2);
+```
+
+## Gradients with respect to Eigen matrices as Eigen matrices
+
+For a once-differentiable `Var<double>` object `f`, `f.grad()` will return a
+`std::vector<double>` of the gradient of `f` with respect to _everything_ on the
+tape, including auxiliary variables. If `f` is a function of some
+`Eigen::Matrix` types then we can call `gradient` to get the gradient of `f` in
+appropriately sized matrices.
+
+```cpp
+Tape<double> tape;
+Eigen::MatrixXd X1 = Eigen::MatrixXd::Random(3, 3);
+Eigen::MatrixXd X2 = Eigen::MatrixXd::Random(3, 3);
+auto Y1 = record_matrix(X1,tape);
+auto Y2 = record_matrix(X2,tape);
+auto f = Y1.array().sin().sum() * Y2.array().cos().sum();
+auto [dfdY1, dfdY2] = gradient(f, Y1, Y2);
+```
+
+## Sparse Jacobian as `Eigen::SparseMatrix`
+
+For a once-differentiable vector of `Var<double>` objects `F`, `sparse_jacobian`
+will populate a `Eigen::SparseMatrix<double>` with the Jacobian of `F`. The rows
+corresond to the elements of `F` and the columns correspond to the elements of 
+the matrices provided as input in their respective storage orders
+(`Eigen::RowMajor` or `Eigen::ColMajor`).
+
+```cpp
+Tape<double> tape;
+Eigen::MatrixXd X1 = Eigen::MatrixXd::Random(3, 3);
+Eigen::MatrixXd X2 = Eigen::MatrixXd::Random(3, 3);
+auto Y1 = record_matrix(X1,tape);
+auto Y2 = record_matrix(X2,tape);
+// expression involving colwise sum resulting in a column matrix
+auto F = (Y1.array().sin().colwise().sum() * Y2.array().cos().colwise().sum()).matrix();
+auto J = sparse_jacobian(F, Y1, Y2);
+```
+
+## Sparse Hessian as `Eigen::SparseMatrix`
+
+Similarly, for a twice-differentiable `Var<Var<double>>` object `f`,
+`sparse_hessian` will populate a `Eigen::SparseMatrix<double>` with the Hessian
+of `f`. The rows and columns correspond to the elements of `f` to the elements
+of input matrices in their respective storage orders (`Eigen::RowMajor` or
+`Eigen::ColMajor`).
+
+```cpp
+Tape<double> tape_1;
+Tape<Var<double>> tape_2;
+auto Y1 = record_matrix(X1,tape);
+auto Y2 = record_matrix(X2,tape);
+auto f = Y1.array().sin().sum() * Y2.array().cos().sum();
+auto H = sparse_hessian(f, Y1, Y2);
 ```
