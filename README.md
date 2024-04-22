@@ -125,11 +125,31 @@ auto f = Y1.array().sin().sum() * Y2.array().cos().sum();
 auto [dfdY1, dfdY2] = gradient(f, Y1, Y2);
 ```
 
+## Hessian with respect to Eigen matrices 
+For a twice-differentiable scalar `Var<double>` object `f`, `hessian` will
+populate a `Eigen::Matrix<double,…>` with the Hessian of `f`. The rows and columns will correspond
+to second partial derivatives with respect to pairs of elements of the
+matrices provided as input in their respective storage orders (`Eigen::RowMajor`
+or `Eigen::ColMajor`). The output matrix will be `Eigen::ColMajor` unless all inputs
+are `Eigen::RowMajor`. The output matrix will have `Eigen::Dynamic` rows and
+cols, unless all inputs have fixed sizes.
+
+```cpp
+Tape<double> tape;
+Tape<Var<double>> tape_2;
+Eigen::MatrixXd X1 = Eigen::MatrixXd::Random(3, 3);
+Eigen::MatrixXd X2 = Eigen::MatrixXd::Random(3, 3);
+auto Y1 = record_matrix(X1,tape_1,tape_2);
+auto Y2 = record_matrix(X2,tape_1,tape_2);
+auto f = Y1.array().sin().sum() * Y2.array().cos().sum();
+auto H = gradient(f, Y1, Y2);
+```
+
 ## Sparse Jacobian as `Eigen::SparseMatrix`
 
 For a once-differentiable vector of `Var<double>` objects `F`, `sparse_jacobian`
 will populate a `Eigen::SparseMatrix<double>` with the Jacobian of `F`. The rows
-corresond to the elements of `F` and the columns correspond to the elements of 
+correspond to the elements of `F` and the columns correspond to the elements of
 the matrices provided as input in their respective storage orders
 (`Eigen::RowMajor` or `Eigen::ColMajor`).
 
