@@ -39,7 +39,7 @@ namespace tinyremo
   template< typename Derived, typename... Tapes>
   auto record_matrix(const Eigen::MatrixBase<Derived>& X, Tapes&... tapes) 
   {
-    return X.unaryExpr([& ](auto&& x) { return record_scalar(x, tapes...); });
+    return X.unaryExpr([& ](auto&& x) { return record_scalar(x, tapes...); }).matrix().eval();
   }
 
   template<typename Matrix, typename Func>
@@ -68,7 +68,9 @@ namespace tinyremo
     auto compute_grad_matrix = [&grads](auto& matrix)
     {
       using MatrixType = std::decay_t<decltype(matrix)>;
-      MatrixType grad_matrix(matrix.rows(), matrix.cols());
+      // Rebuild MatrixType with Var<Scalar> replaced by Scalar
+      using GradMatrixType = Eigen::Matrix<Scalar, MatrixType::RowsAtCompileTime, MatrixType::ColsAtCompileTime, MatrixType::Options, MatrixType::MaxRowsAtCompileTime, MatrixType::MaxColsAtCompileTime>;
+      GradMatrixType grad_matrix(matrix.rows(), matrix.cols());
       iterateMatrix(matrix, [&](Eigen::Index i, Eigen::Index j) { grad_matrix(i, j) = grads[matrix(i, j).getIndex()]; });
       return grad_matrix;
     };
@@ -104,8 +106,16 @@ namespace tinyremo
     iterateMatrix(X, [&](Eigen::Index i, Eigen::Index j)
       {
         auto k = X(i,j).getIndex();
+        //assert(k < outer_row.size());
+        if constexpr (std::is_same_v<OuterContainer, std::vector<size_t>>) { assert(k < outer_row.size()); }
+        
         outer_row[k] = index;
-        inner_col[X(i,j).getValue().getIndex()] = index;
+        const auto & Xij = X(i,j);
+        const auto & Xij_value = Xij.getValue();
+        const auto & Xij_value_index = Xij_value.getIndex();
+        //inner_col[X(i,j).getValue().getIndex()] = index;
+        if constexpr (std::is_same_v<InnerContainer, index_map<size_t,size_t>>) { assert(inner_col.find(Xij_value_index) == inner_col.end()); }
+        inner_col[Xij_value_index] = index;
         ++index;
       });
     return index;
@@ -123,6 +133,21 @@ namespace tinyremo
       });
     };
     (max_index_helper(matrices), ...);
+    return max_so_far;
+  }
+
+  template <typename... Matrices>
+  size_t max_value_index( Matrices &... matrices)
+  {
+    size_t max_so_far = 0;
+    auto max_value_index_helper = [&max_so_far](auto& X)
+    {
+      iterateMatrix(X, [&](Eigen::Index i, Eigen::Index j)
+      {
+        max_so_far = std::max(max_so_far, X(i,j).getValue().getIndex());
+      });
+    };
+    (max_value_index_helper(matrices), ...);
     return max_so_far;
   }
 
@@ -191,6 +216,69 @@ namespace tinyremo
     return sparse_jacobian_generic<Scalar>(F, matrices...);
   }
 
+  template<typename... Matrices>
+  constexpr int any_dynamic() {
+      return ((Matrices::ColsAtCompileTime == Eigen::Dynamic || Matrices::RowsAtCompileTime == Eigen::Dynamic) || ...);
+  }
+
+  // retrun Eigen::RowMajor if all Matrices are RowMajor, otherwise Eigen::ColMajor
+  template<typename... Matrices>
+  constexpr int row_major_if_all() {
+    return ((Matrices::IsRowMajor) && ...) ? Eigen::RowMajor : Eigen::ColMajor;
+  }
+
+  // Assuming non are dynamic
+  template<typename... Matrices>
+  constexpr int total_compile_time_size() {
+    // Better to just assume otherwise logic get's annoying later
+    //static_assert(!any_dynamic<Matrices...>());
+    return (0 + ... + (Matrices::ColsAtCompileTime * Matrices::RowsAtCompileTime));
+  }
+
+  template <typename Scalar, typename... Matrices>
+  auto hessian(const Var<Var<Scalar>> & f, Matrices &... matrices)
+  {
+    constexpr bool has_dynamic = any_dynamic<Matrices...>();
+    constexpr int compile_time_size = total_compile_time_size<Matrices...>();
+    constexpr int N = has_dynamic ? Eigen::Dynamic : compile_time_size;
+    constexpr int order = row_major_if_all<Matrices...>();
+    int N_run = N;
+    if constexpr (N == Eigen::Dynamic) 
+    {
+      N_run = (0 + ... + (matrices.cols() + matrices.rows()));
+    }
+    Eigen::Matrix<Scalar,N,N,order> H(N_run, N_run);
+
+    // Dense gradient
+    auto df_d_raw = f.grad();
+    int outer_i = 0;
+    auto outer_loop = [&](auto & X)
+    {
+      iterateMatrix(X, [&](Eigen::Index i, Eigen::Index j)
+      {
+        auto df_dij = df_d_raw[X(i,j).getIndex()];
+        auto d2f_dij_d_raw = df_dij.grad();
+
+        int inner_j = 0;
+        auto inner_loop = [&](auto & Y)
+        {
+          iterateMatrix(Y, [&](Eigen::Index k, Eigen::Index l)
+          {
+            auto d2f_dij_dkl = d2f_dij_d_raw[Y(k,l).getValue().getIndex()];
+            H(outer_i, inner_j) = d2f_dij_dkl;
+            inner_j++;
+          });
+        };
+        (inner_loop(matrices), ...);
+
+        outer_i++;
+      });
+    };
+    (outer_loop(matrices), ...);
+
+    return H;
+  }
+
   // Assume that the Hessian is sparse but every row or column has at least one
   // entry.
   template <typename Scalar, typename... Matrices>
@@ -200,10 +288,10 @@ namespace tinyremo
   {
     // Dense gradient
     auto df_d_raw = f.grad();
-    std::vector<size_t> outer_row(max_index(matrices...));
+    std::vector<size_t> outer_row(max_index(matrices...)+1);
     index_map<size_t,size_t> inner_col;
     int index = 0;
-    auto collect_indices = [&](auto& X) 
+    auto collect_indices = [&inner_col,&outer_row,&index](auto& X) 
     {
       index = collect_outer_and_inner_indices(X, outer_row, inner_col, index);
     };
@@ -213,6 +301,10 @@ namespace tinyremo
     std::vector<Var<Scalar>> df_d(index);
     auto collect_df_d_entries = [&](auto&X)
     {
+      // This implements
+      //   for each i; A[J[i]] = B[i]
+      // Would it be better to have
+      //   for each j: A[j] = B[I[j]]
       iterateMatrix(X, [&](Eigen::Index i, Eigen::Index j)
       {
         auto df_dij = df_d_raw[X(i,j).getIndex()];
