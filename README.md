@@ -180,3 +180,5 @@ auto Y2 = record_matrix(X2,tape);
 auto f = Y1.array().sin().sum() * Y2.array().cos().sum();
 auto H = sparse_hessian(f, Y1, Y2);
 ```
+
+_You might also be interested in https://github.com/alecjacobson/indexed_sum_
