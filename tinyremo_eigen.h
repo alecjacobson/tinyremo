@@ -245,7 +245,7 @@ namespace tinyremo
     int N_run = N;
     if constexpr (N == Eigen::Dynamic) 
     {
-      N_run = (0 + ... + (matrices.cols() + matrices.rows()));
+      N_run = (0 + ... + static_cast<int>(matrices.rows() * matrices.cols()));
     }
     Eigen::Matrix<Scalar,N,N,order> H(N_run, N_run);
 
