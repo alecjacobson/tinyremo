@@ -10,7 +10,8 @@ autodiff for first-derivatives) and `tinyad (forward-mode for first- and
 second-derivatives)`. [TinyAD](https://github.com/patr-schm/TinyAD) always
 computes the Hessian even if it's not used, like here (hence the poor
 performance). tinyremo consistently beats eigen on this problem; both show good
-performance trend.
+performance trend. TinyAD uses compile-time-constant variable sizes, this is
+great for small sizes but maxes out at N=64 on my laptop before stackoverflow.
 
 ![](gradient-llt.png)
 
@@ -26,7 +27,7 @@ Eigen's autodiff does not support sparse Hessians, so for problems like the
 Hessian of a loop of springs, it produces a dense Hessian with quadratic time
 and memory complexity. In contrast,
 tinyremo and TinyAD support sparse Hessians. tinyremo doesn't require coding the
-loss function in any particular way, but it's about 70× slower than TinyAD,
+loss function in any particular way, but it's about 17× slower than TinyAD,
 which requires coding the loss function in a particular scatter gather loop.
 
 ![](hessian-springs.png)
