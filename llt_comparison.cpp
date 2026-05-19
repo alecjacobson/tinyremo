@@ -11,9 +11,17 @@
 #include <iostream>
 #include <chrono>
 #include <vector>
+#include <limits>
+#include <algorithm>
 
-const int grad_max_N = 64;
+const int grad_max_N = 128;
 const int hess_max_N = 64;
+// TinyAD::Double<N> stores an N×N Hessian inline regardless of whether the
+// Hessian is used.  With EIGEN_STACK_ALLOCATION_LIMIT 0, Eigen::Matrix<ADouble,N,1>
+// puts all of that on the stack: N³×8 bytes.  N=64 → 2 MB (fine), N=128 → 16 MB
+// (overflows the 8 MB macOS default stack).  Cap TinyAD at these values.
+const int tinyad_grad_max_N = 64;
+const int tinyad_hess_max_N = 64;
 const int max_vector_N = 21;
 const int max_matrix_N = max_vector_N;
 // macro to use N if N < max_N otherwise Eigen::Dynamic
@@ -236,15 +244,21 @@ int main()
       tinyremo_computeGradientAndHessian<N,compute_hessian>(x, grad, hessian);
     };
 
-    //auto eigen_times = benchmark<min_N, max_N, eigen_func>();
-    // only call eigen_func if compute_hessian=false;
+    // TinyAD::Double<N> stores an N×N Hessian inline; cap gradient benchmark
+    // at tinyad_grad_max_N to avoid stack overflow (see comment above).
+    constexpr int effective_tinyad_max = compute_hessian
+        ? std::min(max_N, tinyad_hess_max_N)
+        : std::min(max_N, tinyad_grad_max_N);
     std::vector<double> eigen_times; if constexpr (!compute_hessian) { eigen_times = benchmark<min_N, max_N, eigen_func>(); }
-    auto tinyad_times = benchmark<min_N, max_N, tinyad_func>();
+    auto tinyad_times_raw = benchmark<min_N, effective_tinyad_max, tinyad_func>();
     auto tinyremo_times = benchmark<min_N, max_N, tinyremo_func>();
 
+    // benchmark<> returns times largest-N-first.  Align tinyad_times_raw
+    // (which is shorter) to the end so NaN fills the skipped large-N slots.
+    std::vector<double> tinyad_times(tinyremo_times.size(), std::numeric_limits<double>::quiet_NaN());
+    size_t shift = tinyremo_times.size() - tinyad_times_raw.size();
+    for (size_t k = 0; k < tinyad_times_raw.size(); ++k) tinyad_times[k + shift] = tinyad_times_raw[k];
 
-    // TinyAD has to make active variables on the stack so this needs to be
-    // pretty small.
     printf("# Gradient");
     if constexpr (compute_hessian) { printf(" and Hessian"); }
     printf(" Timings for N=%d…%d\n", 2, max_N);
@@ -253,12 +267,12 @@ int main()
     {
       size_t ri = tinyremo_times.size()-i-1;
       if constexpr (compute_hessian) {
-        printf("%lu %g %g\n", 
+        printf("%lu %g %g\n",
             min_N<<i,
             tinyad_times[ri],
             tinyremo_times[ri]);
       } else {
-        printf("%lu %g %g %g\n", 
+        printf("%lu %g %g %g\n",
             min_N<<i,
             eigen_times[ri],
             tinyad_times[ri],
