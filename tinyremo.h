@@ -155,7 +155,8 @@ namespace tinyremo
       using std::sqrt;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / (Scalar(2)*sqrt(v.value))), sqrt(v.value));
+        const auto sv = sqrt(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / (Scalar(2)*sv)), sv);
       }else
       {
         return Var(sqrt(v.value));
@@ -163,11 +164,11 @@ namespace tinyremo
     }
     friend Var sin(const Var& v)
     {
-      using std::cos;
-      using std::sin;
+      using std::cos; using std::sin;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, cos(v.value)), sin(v.value));
+        const auto sv = sin(v.value), cv = cos(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, cv), sv);
       }else
       {
         return Var(sin(v.value));
@@ -175,21 +176,23 @@ namespace tinyremo
     }
     friend Var cos(const Var& v)
     {
-      using std::cos;
-      using std::sin;
+      using std::cos; using std::sin;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, -sin(v.value)), cos(v.value));
+        const auto sv = sin(v.value), cv = cos(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, -sv), cv);
       }else
       {
         return Var(cos(v.value));
       }
     }
-    friend Var exp(const Var& v){
+    friend Var exp(const Var& v)
+    {
       using std::exp;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, exp(v.value)), exp(v.value));
+        const auto ev = exp(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, ev), ev);
       }else
       {
         return Var(exp(v.value));
@@ -200,7 +203,8 @@ namespace tinyremo
       using std::log;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / v.value), log(v.value));
+        const auto lv = log(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / v.value), lv);
       }else
       {
         return Var(log(v.value));
