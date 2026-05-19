@@ -247,35 +247,38 @@ namespace tinyremo
       return derivs;
     }
 
-    index_map<size_t, Scalar> sparse_grad() const 
+    index_map<size_t, Scalar> sparse_grad() const
     {
-      index_map<size_t, Scalar> derivs;
-      compute_sparse_grad(derivs, Scalar(1), index);
-      return derivs;
+      // Sparse iterative reverse sweep using a max-ordered worklist.
+      // Processes each reachable node exactly once in reverse topological
+      // order: O(k log k) for k reachable nodes.  Avoids stack overflow
+      // and the O(2^depth) re-visitation of the old recursive DFS.
+      std::map<size_t, Scalar, std::greater<size_t>> wl;
+      wl.emplace(index, Scalar(1));
+
+      index_map<size_t, Scalar> result;
+      while (!wl.empty()) {
+        auto it = wl.begin();
+        const size_t i = it->first;
+        Scalar g = std::move(it->second);
+        wl.erase(it);
+
+        if (g == Scalar(0)) continue;
+        result.emplace(i, g);
+
+        const auto& node = (*tape_ptr)[i];
+        for (int j = 0; j < 2; ++j) {
+          const size_t dep = node.deps[j];
+          if (dep < i) wl[dep] += node.weights[j] * g;
+        }
+      }
+      return result;
     }
 
     Scalar getValue() const { return value; }
     size_t getIndex() const { return index; }
 
   private:
-    void compute_sparse_grad(index_map<size_t, Scalar>& derivs, Scalar grad_value, size_t idx) const
-    {
-      assert(idx < tape_ptr->size() && idx >= 0);
-      if (derivs.find(idx) != derivs.end()) {
-        derivs[idx] += grad_value;
-      } else {
-        derivs[idx] = grad_value;
-      }
-      const Node<Scalar>& node = (*tape_ptr)[idx];
-      for (int i = 0; i < 2; ++i) {
-        size_t dep_idx = node.deps[i];
-        if (dep_idx < idx) {
-          Scalar weight = node.weights[i];
-          compute_sparse_grad(derivs, grad_value * weight, dep_idx);
-        }
-      }
-    }
-
     Tape<Scalar> * tape_ptr;
     size_t index;
     Scalar value;
