@@ -219,7 +219,7 @@ bool bench_grad(const char* name, int N, Eigen::VectorXd xd, Fn fn,
     Tape<double> tp; { auto xp = record_matrix(xd,tp); fn(xp); }  // probe
     size_t ts = tp.size();
     auto [t, iters] = run([&]{
-        Tape<double> t0; auto x = record_matrix(xd, t0);
+        Tape<double> t0; t0.reserve(ts); auto x = record_matrix(xd, t0);
         auto [g] = gradient(fn(x), x);
         g_sink += g(0);
     });
@@ -235,7 +235,7 @@ bool bench_sparse_jacobian(const char* name, int N, Eigen::VectorXd xd, Fn fn,
     Tape<double> tp; { auto xp = record_matrix(xd,tp); fn(xp); }
     size_t ts = tp.size();
     auto [t, iters] = run([&]{
-        Tape<double> t0; auto x = record_matrix(xd, t0);
+        Tape<double> t0; t0.reserve(ts); auto x = record_matrix(xd, t0);
         auto F = fn(x);
         auto J = sparse_jacobian<double>(F, x);
         g_sink += J.coeff(0,0);
@@ -248,13 +248,14 @@ bool bench_hessian(const char* name, int N, Eigen::VectorXd xd, Fn fn,
                    double skip = std::numeric_limits<double>::infinity())
 {
     Tape<double> t1p; Tape<V1> t2p; { auto xp = record_matrix(xd,t1p,t2p); fn(xp); }
-    size_t ts = t2p.size();
+    size_t ts1 = t1p.size(), ts2 = t2p.size();
     auto [t, iters] = run([&]{
-        Tape<double> t1; Tape<V1> t2; auto x = record_matrix(xd, t1, t2);
+        Tape<double> t1; t1.reserve(ts1); Tape<V1> t2; t2.reserve(ts2);
+        auto x = record_matrix(xd, t1, t2);
         auto H = hessian(fn(x), x);
         g_sink += H(0,0);
     });
-    return row(name, N, ts, iters, t, skip);
+    return row(name, N, ts2, iters, t, skip);
 }
 
 template<typename Fn>
@@ -262,13 +263,14 @@ bool bench_sparse_hessian(const char* name, int N, Eigen::VectorXd xd, Fn fn,
                           double skip = std::numeric_limits<double>::infinity())
 {
     Tape<double> t1p; Tape<V1> t2p; { auto xp = record_matrix(xd,t1p,t2p); fn(xp); }
-    size_t ts = t2p.size();
+    size_t ts1 = t1p.size(), ts2 = t2p.size();
     auto [t, iters] = run([&]{
-        Tape<double> t1; Tape<V1> t2; auto x = record_matrix(xd, t1, t2);
+        Tape<double> t1; t1.reserve(ts1); Tape<V1> t2; t2.reserve(ts2);
+        auto x = record_matrix(xd, t1, t2);
         auto H = sparse_hessian(fn(x), x);
         g_sink += H.coeff(0,0);
     });
-    return row(name, N, ts, iters, t, skip);
+    return row(name, N, ts2, iters, t, skip);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

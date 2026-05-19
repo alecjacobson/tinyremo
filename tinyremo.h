@@ -46,6 +46,7 @@ namespace tinyremo
     }
 
     size_t size() const { return nodes.size(); }
+    void   reserve(size_t n) { nodes.reserve(n); }
 
     const Node<Scalar>& operator[](size_t index) const { return nodes[index]; }
 
