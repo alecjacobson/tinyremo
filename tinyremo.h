@@ -13,6 +13,33 @@ namespace tinyremo
 {
   template<typename Key, typename Value> using index_map = std::unordered_map<Key,Value>;
 
+  // A sorted flat-map backed by std::vector. O(k) insert/erase but cache-
+  // friendly and allocation-free for small k.  Used as the sparse_grad
+  // worklist where k (reachable nodes) is typically small (< 32).
+  // Swap for boost::container::flat_map or std::flat_map (C++23) if available.
+  template<typename Key, typename Value, typename Cmp = std::less<Key>>
+  struct flat_map {
+    using Entry = std::pair<Key, Value>;
+    std::vector<Entry> v;
+    Cmp cmp{};
+
+    bool empty() const { return v.empty(); }
+
+    // Returns reference to value for key, inserting Value{} if absent.
+    Value& operator[](const Key& k) {
+      auto it = std::lower_bound(v.begin(), v.end(), Entry{k, Value{}},
+                                 [&](const Entry& a, const Entry& b){ return cmp(a.first, b.first); });
+      if (it != v.end() && !cmp(k, it->first) && !cmp(it->first, k))
+        return it->second;
+      return v.insert(it, {k, Value{}})->second;
+    }
+
+    // Pop the maximum-key entry (back of ascending-sorted vector).
+    Entry pop_max() { Entry e = v.back(); v.pop_back(); return e; }
+
+    void emplace(Key k, Value val) { (*this)[k] = std::move(val); }
+  };
+
   template<typename Scalar>
   struct Node 
   {
@@ -46,6 +73,7 @@ namespace tinyremo
     }
 
     size_t size() const { return nodes.size(); }
+    void   reserve(size_t n) { nodes.reserve(n); }
 
     const Node<Scalar>& operator[](size_t index) const { return nodes[index]; }
 
@@ -86,7 +114,11 @@ namespace tinyremo
 
     Var operator-(const Var& other) const
     {
-      return *this + (-other);
+      assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
+      if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, Scalar(1), other.index, Scalar(-1)), value - other.value); }
+      if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, Scalar(1)), value - other.value); }
+      if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, Scalar(-1)), value - other.value); }
+      return Var(value - other.value);
     }
 
     Var operator*(const Var& other) const
@@ -101,7 +133,13 @@ namespace tinyremo
     Var operator/(const Var& other) const
     {
       assert(other.value != Scalar(0));
-      return *this * other.invert();
+      const Scalar inv  = Scalar(1) / other.value;          // 1/y
+      const Scalar ninv2 = -value * inv * inv;              // -x/y²
+      assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
+      if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, inv, other.index, ninv2), value * inv); }
+      if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, inv), value * inv); }
+      if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, ninv2), value * inv); }
+      return Var(value * inv);
     }
 
     Var invert() const
@@ -145,7 +183,8 @@ namespace tinyremo
       using std::sqrt;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / (Scalar(2)*sqrt(v.value))), sqrt(v.value));
+        const auto sv = sqrt(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / (Scalar(2)*sv)), sv);
       }else
       {
         return Var(sqrt(v.value));
@@ -153,11 +192,11 @@ namespace tinyremo
     }
     friend Var sin(const Var& v)
     {
-      using std::cos;
-      using std::sin;
+      using std::cos; using std::sin;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, cos(v.value)), sin(v.value));
+        const auto sv = sin(v.value), cv = cos(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, cv), sv);
       }else
       {
         return Var(sin(v.value));
@@ -165,21 +204,23 @@ namespace tinyremo
     }
     friend Var cos(const Var& v)
     {
-      using std::cos;
-      using std::sin;
+      using std::cos; using std::sin;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, -sin(v.value)), cos(v.value));
+        const auto sv = sin(v.value), cv = cos(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, -sv), cv);
       }else
       {
         return Var(cos(v.value));
       }
     }
-    friend Var exp(const Var& v){
+    friend Var exp(const Var& v)
+    {
       using std::exp;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, exp(v.value)), exp(v.value));
+        const auto ev = exp(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, ev), ev);
       }else
       {
         return Var(exp(v.value));
@@ -190,7 +231,8 @@ namespace tinyremo
       using std::log;
       if(v.tape_ptr)
       {
-        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / v.value), log(v.value));
+        const auto lv = log(v.value);
+        return Var(v.tape_ptr, v.tape_ptr->push_unary(v.index, Scalar(1) / v.value), lv);
       }else
       {
         return Var(log(v.value));
@@ -235,47 +277,53 @@ namespace tinyremo
 
     std::vector<Scalar> grad() const
     {
-      std::vector<Scalar> derivs(tape_ptr->size(), Scalar(0));
-      derivs[index] = Scalar(1);
-
-      for (int i = tape_ptr->size() - 1; i >= 0; --i) {
-        const auto& node = (*tape_ptr)[i];
-        for (int j = 0; j < 2; ++j) {
-          derivs[node.deps[j]] += node.weights[j] * derivs[i];
-        }
-      }
+      std::vector<Scalar> derivs;
+      grad(derivs);
       return derivs;
     }
 
-    index_map<size_t, Scalar> sparse_grad() const 
+    // In-place variant: reuses a caller-supplied buffer, avoiding
+    // repeated heap allocation when grad() is called in a tight loop.
+    void grad(std::vector<Scalar>& out) const
     {
-      index_map<size_t, Scalar> derivs;
-      compute_sparse_grad(derivs, Scalar(1), index);
-      return derivs;
+      out.assign(tape_ptr->size(), Scalar(0));
+      out[index] = Scalar(1);
+      for (int i = (int)tape_ptr->size() - 1; i >= 0; --i) {
+        if (out[i] == Scalar(0)) continue;
+        const auto& node = (*tape_ptr)[i];
+        for (int j = 0; j < 2; ++j)
+          out[node.deps[j]] += node.weights[j] * out[i];
+      }
+    }
+
+    index_map<size_t, Scalar> sparse_grad() const
+    {
+      // Sparse iterative reverse sweep.  flat_map worklist: ascending key
+      // order so pop_max() is O(1); insert is O(k) but cache-friendly for
+      // the small k typical of sparse functions.
+      flat_map<size_t, Scalar> wl;
+      wl[index] = Scalar(1);
+
+      index_map<size_t, Scalar> result;
+      while (!wl.empty()) {
+        auto [i, g] = wl.pop_max();
+
+        if (g == Scalar(0)) continue;
+        result.emplace(i, g);
+
+        const auto& node = (*tape_ptr)[i];
+        for (int j = 0; j < 2; ++j) {
+          const size_t dep = node.deps[j];
+          if (dep < i) wl[dep] += node.weights[j] * g;
+        }
+      }
+      return result;
     }
 
     Scalar getValue() const { return value; }
     size_t getIndex() const { return index; }
 
   private:
-    void compute_sparse_grad(index_map<size_t, Scalar>& derivs, Scalar grad_value, size_t idx) const
-    {
-      assert(idx < tape_ptr->size() && idx >= 0);
-      if (derivs.find(idx) != derivs.end()) {
-        derivs[idx] += grad_value;
-      } else {
-        derivs[idx] = grad_value;
-      }
-      const Node<Scalar>& node = (*tape_ptr)[idx];
-      for (int i = 0; i < 2; ++i) {
-        size_t dep_idx = node.deps[i];
-        if (dep_idx < idx) {
-          Scalar weight = node.weights[i];
-          compute_sparse_grad(derivs, grad_value * weight, dep_idx);
-        }
-      }
-    }
-
     Tape<Scalar> * tape_ptr;
     size_t index;
     Scalar value;

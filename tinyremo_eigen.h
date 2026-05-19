@@ -249,23 +249,27 @@ namespace tinyremo
     }
     Eigen::Matrix<Scalar,N,N,order> H(N_run, N_run);
 
-    // Dense gradient
+    // Dense gradient of the outer (tape2) function
     auto df_d_raw = f.grad();
+
+    // Single inner-gradient buffer reused across all N outer variables,
+    // avoiding N separate heap allocations of tape1.size() doubles.
+    std::vector<Scalar> inner_buf;
+
     int outer_i = 0;
     auto outer_loop = [&](auto & X)
     {
       iterateMatrix(X, [&](Eigen::Index i, Eigen::Index j)
       {
         auto df_dij = df_d_raw[X(i,j).getIndex()];
-        auto d2f_dij_d_raw = df_dij.grad();
+        df_dij.grad(inner_buf);
 
         int inner_j = 0;
         auto inner_loop = [&](auto & Y)
         {
           iterateMatrix(Y, [&](Eigen::Index k, Eigen::Index l)
           {
-            auto d2f_dij_dkl = d2f_dij_d_raw[Y(k,l).getValue().getIndex()];
-            H(outer_i, inner_j) = d2f_dij_dkl;
+            H(outer_i, inner_j) = inner_buf[Y(k,l).getValue().getIndex()];
             inner_j++;
           });
         };
