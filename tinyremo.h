@@ -289,7 +289,14 @@ namespace tinyremo
       out.assign(tape_ptr->size(), Scalar(0));
       out[index] = Scalar(1);
       for (int i = (int)tape_ptr->size() - 1; i >= 0; --i) {
-        if (out[i] == Scalar(0)) continue;
+        // Zero-skip is only safe for plain arithmetic scalars.  When
+        // Scalar = Var<T> (nested tape), value == 0 does NOT imply that
+        // the inner derivative is zero, so skipping would silently drop
+        // second-derivative contributions (e.g. Hessian at a gradient
+        // minimum where all first-order adjoints are zero but H ≠ 0).
+        if constexpr (std::is_arithmetic_v<Scalar>) {
+          if (out[i] == Scalar(0)) continue;
+        }
         const auto& node = (*tape_ptr)[i];
         for (int j = 0; j < 2; ++j)
           out[node.deps[j]] += node.weights[j] * out[i];
