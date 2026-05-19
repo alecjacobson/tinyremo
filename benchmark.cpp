@@ -7,6 +7,7 @@
 #include <limits>
 #include <cstdio>
 #include <functional>
+#include <set>
 
 using V1 = tinyremo::Var<double>;
 using V2 = tinyremo::Var<V1>;
@@ -113,6 +114,62 @@ T ratio_func(const Eigen::Matrix<T,Eigen::Dynamic,1>& x, int N)
     for (int i = 0; i < N; i++) {
         int j = (i+1)%N;
         E += (x(i)-x(j))/(x(i)+x(j));
+    }
+    return E;
+}
+
+// Random graph: N 2D points, each connected to ~k random neighbours.
+// Hessian is sparse but irregular (not banded).
+// Uses a simple deterministic LCG for reproducibility.
+struct RandomGraph {
+    int N;
+    std::vector<std::pair<int,int>> edges;  // undirected, (i<j)
+    Eigen::VectorXd x;                      // 2N flat position vector
+};
+
+static RandomGraph make_random_graph(int N, int k_per_node = 4, uint64_t seed = 42)
+{
+    // Deterministic LCG (Knuth)
+    auto rnd = [](uint64_t& s) -> uint64_t {
+        return s = s * 6364136223846793005ULL + 1442695040888963407ULL;
+    };
+    auto rnd_int = [&](uint64_t& s, int n) -> int {
+        return (int)((rnd(s) >> 33) % (uint64_t)n);
+    };
+    auto rnd_double = [&](uint64_t& s) -> double {
+        return (double)(rnd(s) >> 11) * (1.0 / (double)(1ULL << 53));
+    };
+
+    uint64_t s = seed;
+
+    // Positions: uniform on [0, sqrt(N)] x [0, sqrt(N)]
+    double scale = std::sqrt((double)N);
+    Eigen::VectorXd x(2*N);
+    for (int i = 0; i < 2*N; i++) x(i) = rnd_double(s) * scale;
+
+    // Edges: for each node try to attach k_per_node unique neighbours
+    std::set<std::pair<int,int>> seen;
+    std::vector<std::pair<int,int>> edges;
+    for (int i = 0; i < N; i++) {
+        for (int t = 0, added = 0; t < k_per_node*6 && added < k_per_node; ++t) {
+            int j = rnd_int(s, N);
+            if (j == i) continue;
+            auto e = std::make_pair(std::min(i,j), std::max(i,j));
+            if (seen.insert(e).second) { edges.push_back(e); ++added; }
+        }
+    }
+    return {N, std::move(edges), std::move(x)};
+}
+
+template <typename T>
+T random_spring_energy(const Eigen::Matrix<T,Eigen::Dynamic,1>& x,
+                       const std::vector<std::pair<int,int>>& edges)
+{
+    T E(0);
+    for (auto& [i,j] : edges) {
+        T dx = x(2*j)-x(2*i), dy = x(2*j+1)-x(2*i+1);
+        T d  = sqrt(dx*dx + dy*dy) - T(1);
+        E   += T(0.5)*d*d;
     }
     return E;
 }
@@ -239,6 +296,12 @@ int main()
     for (int N = 4; N <= 512; N *= 2)
         bench_grad("ratio/grad",      N,   ratio_x(N), [N](auto& x){ return ratio_func(x,N);     });
     printf("\n");
+    // Random graph: irregular sparsity, large N
+    for (int N : {100, 500, 1000, 5000, 10000}) {
+        auto g = make_random_graph(N);
+        bench_grad("rand_spring/grad", 2*N, g.x, [&g](auto& x){ return random_spring_energy(x, g.edges); });
+    }
+    printf("\n");
 
     // ── sparse_jacobian() ─────────────────────────────────────────────────────
     // stencil: each of N outputs depends on 2 inputs → bidiagonal J (2 nz/row).
@@ -281,6 +344,15 @@ int main()
     printf("\n");
     { bool ok=true; for (int N=4; N<=512 && ok; N*=2)
         ok = bench_sparse_hessian("ratio/sparse_hessian",      N,   ratio_x(N), [N](auto& x){ return ratio_func(x,N);     }, 0.5); }
+    printf("\n");
+    // Random graph: irregular (non-banded) sparsity, large N, ~4 edges/node
+    { bool ok=true;
+      for (int N : {100, 500, 1000, 5000, 10000}) if (ok) {
+          auto g = make_random_graph(N);
+          ok = bench_sparse_hessian("rand_spring/sparse_hessian", 2*N, g.x,
+                                    [&g](auto& x){ return random_spring_energy(x, g.edges); }, 0.5);
+      }
+    }
     printf("\n");
 
     return 0;
