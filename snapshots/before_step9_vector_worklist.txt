@@ -1,0 +1,153 @@
+# Tue 19 May 2026 15:35:02 EDT
+# Darwin 24.6.0
+# scenario                          N tape_nodes   iters      t/call(s)
+# --- grad() : first derivative, dense backward pass
+spring/grad                         8         48     500     3.6192e-07
+spring/grad                        16         96     500     6.5567e-07
+spring/grad                        32        192     500     1.1764e-06
+spring/grad                        64        384     500     2.2505e-06
+spring/grad                       128        768     500     4.3574e-06
+spring/grad                       256       1536     500     8.6020e-06
+spring/grad                       512       3072     500     1.6854e-05
+spring/grad                      1024       6144     500     3.2133e-05
+spring/grad                      2048      12288     500     6.4362e-05
+
+llt/grad                            3         72     500     4.7467e-07
+llt/grad                            4        131     500     8.1042e-07
+llt/grad                            6        314     500     1.7042e-06
+llt/grad                            8        597     500     2.9768e-06
+llt/grad                           12       1355     500     5.7598e-06
+llt/grad                           16       2255     500     8.7022e-06
+llt/grad                           24       4551     500     1.8094e-05
+
+rosenbrock/grad                     4         28     500     2.3058e-07
+rosenbrock/grad                     8         64     500     4.2842e-07
+rosenbrock/grad                    16        136     500     8.1633e-07
+rosenbrock/grad                    32        280     500     1.5627e-06
+rosenbrock/grad                    64        568     500     2.9556e-06
+rosenbrock/grad                   128       1144     500     5.8069e-06
+rosenbrock/grad                   256       2296     500     1.1619e-05
+rosenbrock/grad                   512       4600     500     2.3666e-05
+rosenbrock/grad                  1024       9208     500     4.8202e-05
+
+trig/grad                           4         32     500     2.6183e-07
+trig/grad                           8         64     500     4.8175e-07
+trig/grad                          16        128     500     9.8008e-07
+trig/grad                          32        256     500     1.6540e-06
+trig/grad                          64        512     500     3.0732e-06
+trig/grad                         128       1024     500     6.0899e-06
+trig/grad                         256       2048     500     1.1966e-05
+trig/grad                         512       4096     500     2.4473e-05
+
+ratio/grad                          4         20     500     2.0058e-07
+ratio/grad                          8         40     500     3.2275e-07
+ratio/grad                         16         80     500     5.5867e-07
+ratio/grad                         32        160     500     9.6800e-07
+ratio/grad                         64        320     500     1.7628e-06
+ratio/grad                        128        640     500     3.3859e-06
+ratio/grad                        256       1280     500     6.7803e-06
+ratio/grad                        512       2560     500     1.3389e-05
+
+rand_spring/grad                  200       4200     500     2.3185e-05
+rand_spring/grad                 1000      21000     500     1.1655e-04
+rand_spring/grad                 2000      42000     500     2.4400e-04
+rand_spring/grad                10000     210000     359     1.4394e-03
+rand_spring/grad                20000     420000     200     2.5310e-03
+
+# --- sparse_jacobian() : bidiagonal stencil, 2 nonzeros per row
+stencil/sparse_jacobian             4         24     500     1.7812e-06
+stencil/sparse_jacobian             8         48     500     3.3873e-06
+stencil/sparse_jacobian            16         96     500     6.4234e-06
+stencil/sparse_jacobian            32        192     500     1.2601e-05
+stencil/sparse_jacobian            64        384     500     2.4688e-05
+stencil/sparse_jacobian           128        768     500     4.8492e-05
+stencil/sparse_jacobian           256       1536     500     9.5486e-05
+stencil/sparse_jacobian           512       3072     500     1.8964e-04
+stencil/sparse_jacobian          1024       6144     500     3.7858e-04
+
+# --- hessian() : second derivative, dense (skips when >0.5s/call)
+spring/hessian                      8         48     500     3.3026e-06
+spring/hessian                     16         96     500     7.9688e-06
+spring/hessian                     32        192     500     2.1241e-05
+spring/hessian                     64        384     500     6.9760e-05
+spring/hessian                    128        768     500     2.4462e-04
+spring/hessian                    256       1536     500     8.6358e-04
+spring/hessian                    512       3072     141     3.5602e-03
+spring/hessian                   1024       6144      36     1.4314e-02
+
+llt/hessian                         3         72     500     3.5129e-06
+llt/hessian                         4        131     500     7.1723e-06
+llt/hessian                         6        314     500     2.2386e-05
+llt/hessian                         8        597     500     5.2480e-05
+llt/hessian                        12       1355     500     1.4811e-04
+llt/hessian                        16       2255     500     2.7462e-04
+
+rosenbrock/hessian                  4         28     500     1.2458e-06
+rosenbrock/hessian                  8         64     500     3.1797e-06
+rosenbrock/hessian                 16        136     500     8.5176e-06
+rosenbrock/hessian                 32        280     500     2.4967e-05
+rosenbrock/hessian                 64        568     500     9.7271e-05
+rosenbrock/hessian                128       1144     500     3.0188e-04
+rosenbrock/hessian                256       2296     454     1.0646e-03
+rosenbrock/hessian                512       4600     111     4.4654e-03
+
+trig/hessian                        4         32     500     1.2582e-06
+trig/hessian                        8         64     500     2.9994e-06
+trig/hessian                       16        128     500     7.5739e-06
+trig/hessian                       32        256     500     2.1115e-05
+trig/hessian                       64        512     500     6.5471e-05
+trig/hessian                      128       1024     500     2.6275e-04
+trig/hessian                      256       2048     500     9.4823e-04
+
+ratio/hessian                       4         20     500     1.0039e-06
+ratio/hessian                       8         40     500     2.4955e-06
+ratio/hessian                      16         80     500     6.2504e-06
+ratio/hessian                      32        160     500     1.7497e-05
+ratio/hessian                      64        320     500     5.3357e-05
+ratio/hessian                     128        640     500     2.1315e-04
+ratio/hessian                     256       1280     500     7.5601e-04
+
+# --- sparse_hessian() : second derivative, sparse (skips when >0.5s/call)
+spring/sparse_hessian               8         48     500     2.4407e-05
+spring/sparse_hessian              16         96     500     4.8832e-05
+spring/sparse_hessian              32        192     500     9.6351e-05
+spring/sparse_hessian              64        384     500     2.0528e-04
+spring/sparse_hessian             128        768     500     4.0872e-04
+spring/sparse_hessian             256       1536     500     8.0080e-04
+spring/sparse_hessian             512       3072     285     1.6229e-03
+spring/sparse_hessian            1024       6144     147     3.3208e-03
+spring/sparse_hessian            2048      12288      74     6.7371e-03
+
+rosenbrock/sparse_hessian           4         28     500     6.7541e-06
+rosenbrock/sparse_hessian           8         64     500     1.4480e-05
+rosenbrock/sparse_hessian          16        136     500     3.0022e-05
+rosenbrock/sparse_hessian          32        280     500     6.4901e-05
+rosenbrock/sparse_hessian          64        568     500     1.3408e-04
+rosenbrock/sparse_hessian         128       1144     500     2.6375e-04
+rosenbrock/sparse_hessian         256       2296     500     5.0448e-04
+rosenbrock/sparse_hessian         512       4600     474     1.0323e-03
+
+trig/sparse_hessian                 4         32     500     6.7568e-06
+trig/sparse_hessian                 8         64     500     1.2960e-05
+trig/sparse_hessian                16        128     500     2.5517e-05
+trig/sparse_hessian                32        256     500     5.0383e-05
+trig/sparse_hessian                64        512     500     9.9985e-05
+trig/sparse_hessian               128       1024     500     2.2112e-04
+trig/sparse_hessian               256       2048     500     4.2182e-04
+trig/sparse_hessian               512       4096     500     8.2693e-04
+
+ratio/sparse_hessian                4         20     500     6.8563e-06
+ratio/sparse_hessian                8         40     500     1.3360e-05
+ratio/sparse_hessian               16         80     500     2.6319e-05
+ratio/sparse_hessian               32        160     500     5.2299e-05
+ratio/sparse_hessian               64        320     500     1.0373e-04
+ratio/sparse_hessian              128        640     500     2.2740e-04
+ratio/sparse_hessian              256       1280     500     4.4428e-04
+ratio/sparse_hessian              512       2560     500     8.6033e-04
+
+rand_spring/sparse_hessian        200       4200     173     2.6790e-03
+rand_spring/sparse_hessian       1000      21000      35     1.4118e-02
+rand_spring/sparse_hessian       2000      42000      17     2.8607e-02
+rand_spring/sparse_hessian      10000     210000       3     1.4308e-01
+rand_spring/sparse_hessian      20000     420000       2     2.9150e-01
+
