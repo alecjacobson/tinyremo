@@ -105,7 +105,13 @@ namespace tinyremo
     Var operator/(const Var& other) const
     {
       assert(other.value != Scalar(0));
-      return *this * other.invert();
+      const Scalar inv  = Scalar(1) / other.value;          // 1/y
+      const Scalar ninv2 = -value * inv * inv;              // -x/y²
+      assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
+      if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, inv, other.index, ninv2), value * inv); }
+      if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, inv), value * inv); }
+      if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, ninv2), value * inv); }
+      return Var(value * inv);
     }
 
     Var invert() const
