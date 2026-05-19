@@ -30,3 +30,8 @@ add_executable(tests tests.cpp)
 target_include_directories(tests PRIVATE ${doctest_SOURCE_DIR})
 target_link_libraries(tests PRIVATE Eigen3::Eigen)
 target_compile_features(tests PRIVATE cxx_std_20)
+
+add_executable(benchmark benchmark.cpp)
+target_link_libraries(benchmark PRIVATE Eigen3::Eigen)
+target_compile_features(benchmark PRIVATE cxx_std_20)
+target_compile_options(benchmark PRIVATE -O3)
