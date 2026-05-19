@@ -250,17 +250,23 @@ namespace tinyremo
 
     std::vector<Scalar> grad() const
     {
-      std::vector<Scalar> derivs(tape_ptr->size(), Scalar(0));
-      derivs[index] = Scalar(1);
-
-      for (int i = tape_ptr->size() - 1; i >= 0; --i) {
-        if (derivs[i] == Scalar(0)) continue;
-        const auto& node = (*tape_ptr)[i];
-        for (int j = 0; j < 2; ++j) {
-          derivs[node.deps[j]] += node.weights[j] * derivs[i];
-        }
-      }
+      std::vector<Scalar> derivs;
+      grad(derivs);
       return derivs;
+    }
+
+    // In-place variant: reuses a caller-supplied buffer, avoiding
+    // repeated heap allocation when grad() is called in a tight loop.
+    void grad(std::vector<Scalar>& out) const
+    {
+      out.assign(tape_ptr->size(), Scalar(0));
+      out[index] = Scalar(1);
+      for (int i = (int)tape_ptr->size() - 1; i >= 0; --i) {
+        if (out[i] == Scalar(0)) continue;
+        const auto& node = (*tape_ptr)[i];
+        for (int j = 0; j < 2; ++j)
+          out[node.deps[j]] += node.weights[j] * out[i];
+      }
     }
 
     index_map<size_t, Scalar> sparse_grad() const
