@@ -4,6 +4,7 @@
 #include <Eigen/Dense>
 #include <cmath>
 #include <numbers>
+#include <functional>
 
 using namespace tinyremo;
 using V1 = Var<double>;
@@ -665,4 +666,218 @@ TEST_CASE("iterateMatrix: hessian correct for row-major input")
     auto X = record_matrix(Xd, t1, t2);
     auto H = hessian(X.squaredNorm(), X);
     CHECK((H - 2.0*Eigen::Matrix<double,4,4>::Identity()).norm() < TOL);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Functions ported from the comparison branch (all-dynamic, small N)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// f(x) = ||A(x)^{-1} x||^2 where A_ij = x_i+x_j, A_ii *= 2
+// Differentiating through Eigen's LLT decomposition.
+template <typename T>
+T llt_func(const Eigen::Matrix<T, Eigen::Dynamic, 1>& x)
+{
+    int N = (int)x.size();
+    Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic> A(N, N);
+    for (int i = 0; i < N; i++) {
+        for (int j = 0; j < N; j++)
+            A(i, j) = x(i) + x(j);
+        A(i, i) = T(2) * A(i, i);
+    }
+    return A.llt().solve(x).eval().squaredNorm();
+}
+
+// Sum of 0.5*(||p_{i+1 mod N} - p_i|| - 1)^2 over a loop of N 2D springs.
+// x is a flat 2N vector: [x0,y0, x1,y1, ...].
+template <typename T>
+T spring_energy(const Eigen::Matrix<T, Eigen::Dynamic, 1>& x, int N)
+{
+    T E(0);
+    for (int i = 0; i < N; i++) {
+        int j = (i + 1) % N;
+        T dx = x(2*j)   - x(2*i);
+        T dy = x(2*j+1) - x(2*i+1);
+        T d  = sqrt(dx*dx + dy*dy) - T(1);
+        E += T(0.5) * d * d;
+    }
+    return E;
+}
+
+// Finite-difference helpers (centered, O(eps^2) gradient, O(eps) hessian)
+static Eigen::VectorXd fd_grad(
+    const Eigen::VectorXd& x,
+    std::function<double(const Eigen::VectorXd&)> f,
+    double eps = 1e-5)
+{
+    Eigen::VectorXd g(x.size());
+    for (int i = 0; i < (int)x.size(); i++) {
+        Eigen::VectorXd xp = x, xm = x;
+        xp(i) += eps; xm(i) -= eps;
+        g(i) = (f(xp) - f(xm)) / (2*eps);
+    }
+    return g;
+}
+
+static Eigen::MatrixXd fd_hess(
+    const Eigen::VectorXd& x,
+    std::function<double(const Eigen::VectorXd&)> f,
+    double eps = 1e-5)
+{
+    int n = (int)x.size();
+    Eigen::MatrixXd H(n, n);
+    for (int i = 0; i < n; i++) {
+        Eigen::VectorXd xp = x, xm = x;
+        xp(i) += eps; xm(i) -= eps;
+        H.col(i) = (fd_grad(xp, f, eps) - fd_grad(xm, f, eps)) / (2*eps);
+    }
+    return H;
+}
+
+static const double FD_GRAD_TOL = 1e-5;  // O(eps^2) FD gradient error
+static const double FD_HESS_TOL = 1e-4;  // O(eps)   FD hessian error
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LLT tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("llt: gradient matches FD (N=3)")
+{
+    Eigen::VectorXd xd(3); xd << 1.0, 2.0, 3.0;
+    auto f = [](const Eigen::VectorXd& x) { return llt_func(x); };
+
+    Tape<double> t;
+    auto x = record_matrix(xd, t);
+    auto [g] = gradient(llt_func(x), x);
+
+    CHECK((g - fd_grad(xd, f)).cwiseAbs().maxCoeff() < FD_GRAD_TOL);
+}
+
+TEST_CASE("llt: dense hessian matches FD (N=3)")
+{
+    Eigen::VectorXd xd(3); xd << 1.0, 2.0, 3.0;
+    auto f = [](const Eigen::VectorXd& x) { return llt_func(x); };
+
+    Tape<double> t1; Tape<V1> t2;
+    auto x = record_matrix(xd, t1, t2);
+    auto H = hessian(llt_func(x), x);
+
+    CHECK((H - fd_hess(xd, f)).cwiseAbs().maxCoeff() < FD_HESS_TOL);
+}
+
+TEST_CASE("llt: sparse hessian matches dense hessian (N=3)")
+{
+    Eigen::VectorXd xd(3); xd << 1.0, 2.0, 3.0;
+
+    Tape<double> td1; Tape<V1> td2;
+    auto Xd = record_matrix(xd, td1, td2);
+    auto Hd = hessian(llt_func(Xd), Xd);
+
+    Tape<double> ts1; Tape<V1> ts2;
+    auto Xs = record_matrix(xd, ts1, ts2);
+    auto Hs = sparse_hessian(llt_func(Xs), Xs);
+
+    CHECK((Eigen::MatrixXd(Hs) - Hd).norm() < TOL);
+}
+
+TEST_CASE("llt: hessian is symmetric (N=4)")
+{
+    Eigen::VectorXd xd(4); xd << 1.0, 2.0, 3.0, 4.0;
+
+    Tape<double> t1; Tape<V1> t2;
+    auto x = record_matrix(xd, t1, t2);
+    auto H = hessian(llt_func(x), x);
+
+    CHECK((H - H.transpose()).norm() < TOL);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Spring tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Regular N-gon with unit edge lengths, slightly perturbed off the minimum
+static Eigen::VectorXd spring_init(int N)
+{
+    const double r = 1.0 / (2.0 * std::sin(std::numbers::pi / N));
+    Eigen::VectorXd x(2 * N);
+    for (int i = 0; i < N; i++) {
+        x(2*i)   = r * std::cos(2.0 * std::numbers::pi * i / N);
+        x(2*i+1) = r * std::sin(2.0 * std::numbers::pi * i / N);
+    }
+    // Perturb so the gradient is non-zero
+    for (int i = 0; i < 2*N; i++) x(i) += 0.1 * std::sin(double(i + 1));
+    return x;
+}
+
+TEST_CASE("spring: gradient matches FD (N=5)")
+{
+    const int N = 5;
+    Eigen::VectorXd xd = spring_init(N);
+    auto f = [N](const Eigen::VectorXd& x) { return spring_energy(x, N); };
+
+    Tape<double> t;
+    auto x = record_matrix(xd, t);
+    auto [g] = gradient(spring_energy(x, N), x);
+
+    CHECK((g - fd_grad(xd, f)).cwiseAbs().maxCoeff() < FD_GRAD_TOL);
+}
+
+TEST_CASE("spring: dense hessian matches FD (N=5)")
+{
+    const int N = 5;
+    Eigen::VectorXd xd = spring_init(N);
+    auto f = [N](const Eigen::VectorXd& x) { return spring_energy(x, N); };
+
+    Tape<double> t1; Tape<V1> t2;
+    auto x = record_matrix(xd, t1, t2);
+    auto H = hessian(spring_energy(x, N), x);
+
+    CHECK((H - fd_hess(xd, f)).cwiseAbs().maxCoeff() < FD_HESS_TOL);
+}
+
+TEST_CASE("spring: sparse hessian matches dense hessian (N=5)")
+{
+    const int N = 5;
+    Eigen::VectorXd xd = spring_init(N);
+
+    Tape<double> td1; Tape<V1> td2;
+    auto Xd = record_matrix(xd, td1, td2);
+    auto Hd = hessian(spring_energy(Xd, N), Xd);
+
+    Tape<double> ts1; Tape<V1> ts2;
+    auto Xs = record_matrix(xd, ts1, ts2);
+    auto Hs = sparse_hessian(spring_energy(Xs, N), Xs);
+
+    CHECK((Eigen::MatrixXd(Hs) - Hd).norm() < TOL);
+}
+
+TEST_CASE("spring: hessian is symmetric (N=6)")
+{
+    const int N = 6;
+    Eigen::VectorXd xd = spring_init(N);
+
+    Tape<double> t1; Tape<V1> t2;
+    auto x = record_matrix(xd, t1, t2);
+    auto H = hessian(spring_energy(x, N), x);
+
+    CHECK((H - H.transpose()).norm() < TOL);
+}
+
+TEST_CASE("spring: sparse hessian has correct sparsity (N=6, bandwidth 2)")
+{
+    // Each spring i connects vertex i and (i+1)%N, so the 2x2 DOF blocks
+    // along the block-tridiagonal plus the wrap-around block are the only
+    // non-zeros.  Any entry more than 2 DOFs away from a connected pair
+    // should be zero.
+    const int N = 6;
+    Eigen::VectorXd xd = spring_init(N);
+
+    Tape<double> t1; Tape<V1> t2;
+    auto x = record_matrix(xd, t1, t2);
+    auto H = sparse_hessian(spring_energy(x, N), x);
+
+    // DOF pairs (a,b) that share NO spring: |vertex(a) - vertex(b)| > 1 mod N
+    // e.g. vertex 0 (DOFs 0,1) and vertex 2 (DOFs 4,5) are not neighbours
+    for (int dof_a : {0, 1})
+        for (int dof_b : {4, 5})
+            CHECK(std::abs(H.coeff(dof_a, dof_b)) < TOL);
 }
