@@ -253,6 +253,7 @@ namespace tinyremo
       derivs[index] = Scalar(1);
 
       for (int i = tape_ptr->size() - 1; i >= 0; --i) {
+        if (derivs[i] == Scalar(0)) continue;
         const auto& node = (*tape_ptr)[i];
         for (int j = 0; j < 2; ++j) {
           derivs[node.deps[j]] += node.weights[j] * derivs[i];
