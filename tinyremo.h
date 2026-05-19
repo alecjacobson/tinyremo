@@ -86,7 +86,11 @@ namespace tinyremo
 
     Var operator-(const Var& other) const
     {
-      return *this + (-other);
+      assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
+      if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, Scalar(1), other.index, Scalar(-1)), value - other.value); }
+      if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, Scalar(1)), value - other.value); }
+      if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, Scalar(-1)), value - other.value); }
+      return Var(value - other.value);
     }
 
     Var operator*(const Var& other) const
