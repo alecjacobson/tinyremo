@@ -13,6 +13,33 @@ namespace tinyremo
 {
   template<typename Key, typename Value> using index_map = std::unordered_map<Key,Value>;
 
+  // A sorted flat-map backed by std::vector. O(k) insert/erase but cache-
+  // friendly and allocation-free for small k.  Used as the sparse_grad
+  // worklist where k (reachable nodes) is typically small (< 32).
+  // Swap for boost::container::flat_map or std::flat_map (C++23) if available.
+  template<typename Key, typename Value, typename Cmp = std::less<Key>>
+  struct flat_map {
+    using Entry = std::pair<Key, Value>;
+    std::vector<Entry> v;
+    Cmp cmp{};
+
+    bool empty() const { return v.empty(); }
+
+    // Returns reference to value for key, inserting Value{} if absent.
+    Value& operator[](const Key& k) {
+      auto it = std::lower_bound(v.begin(), v.end(), Entry{k, Value{}},
+                                 [&](const Entry& a, const Entry& b){ return cmp(a.first, b.first); });
+      if (it != v.end() && !cmp(k, it->first) && !cmp(it->first, k))
+        return it->second;
+      return v.insert(it, {k, Value{}})->second;
+    }
+
+    // Pop the maximum-key entry (back of ascending-sorted vector).
+    Entry pop_max() { Entry e = v.back(); v.pop_back(); return e; }
+
+    void emplace(Key k, Value val) { (*this)[k] = std::move(val); }
+  };
+
   template<typename Scalar>
   struct Node 
   {
@@ -271,19 +298,15 @@ namespace tinyremo
 
     index_map<size_t, Scalar> sparse_grad() const
     {
-      // Sparse iterative reverse sweep using a max-ordered worklist.
-      // Processes each reachable node exactly once in reverse topological
-      // order: O(k log k) for k reachable nodes.  Avoids stack overflow
-      // and the O(2^depth) re-visitation of the old recursive DFS.
-      std::map<size_t, Scalar, std::greater<size_t>> wl;
-      wl.emplace(index, Scalar(1));
+      // Sparse iterative reverse sweep.  flat_map worklist: ascending key
+      // order so pop_max() is O(1); insert is O(k) but cache-friendly for
+      // the small k typical of sparse functions.
+      flat_map<size_t, Scalar> wl;
+      wl[index] = Scalar(1);
 
       index_map<size_t, Scalar> result;
       while (!wl.empty()) {
-        auto it = wl.begin();
-        const size_t i = it->first;
-        Scalar g = std::move(it->second);
-        wl.erase(it);
+        auto [i, g] = wl.pop_max();
 
         if (g == Scalar(0)) continue;
         result.emplace(i, g);
