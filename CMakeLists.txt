@@ -28,3 +28,8 @@ add_executable(projhess_test projhess_test.cpp)
 target_include_directories(projhess_test PRIVATE ${doctest_SOURCE_DIR})
 target_link_libraries(projhess_test PRIVATE Eigen3::Eigen)
 target_compile_features(projhess_test PRIVATE cxx_std_20)
+
+add_executable(projhess_bench projhess_bench.cpp)
+target_link_libraries(projhess_bench PRIVATE Eigen3::Eigen)
+target_compile_features(projhess_bench PRIVATE cxx_std_20)
+target_compile_options(projhess_bench PRIVATE -O3)
