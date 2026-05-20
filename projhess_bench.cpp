@@ -100,6 +100,36 @@ static Eigen::VectorXd flatten(const Eigen::MatrixXd& V)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Global-tape sparse Hessian: one shared tape for all elements, no projection.
+// Baseline: this is just ordinary tinyremo usage.
+// ─────────────────────────────────────────────────────────────────────────────
+static Eigen::SparseMatrix<double>
+global_sparse_hessian(const Eigen::MatrixXd& V,
+                      const Eigen::MatrixXi& F,
+                      const std::vector<ElemData>& elems)
+{
+    using V1 = tinyremo::Var<double>;
+    using V2 = tinyremo::Var<V1>;
+
+    Eigen::VectorXd x_d = flatten(V);
+    tinyremo::Tape<double> t1; tinyremo::Tape<V1> t2;
+    auto x = tinyremo::record_matrix(x_d, t1, t2);
+
+    V2 f(0);
+    for (int fi = 0; fi < F.rows(); fi++) {
+        Eigen::Matrix<V2, Eigen::Dynamic, 1> xl(6);
+        for (int i = 0; i < 3; i++) {
+            int vi = F(fi, i);
+            xl(2*i)   = x(2*vi);
+            xl(2*i+1) = x(2*vi+1);
+        }
+        f += neohookean_2d(xl, elems[fi].Mr_inv, elems[fi].A);
+    }
+
+    return tinyremo::sparse_hessian(f, x);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Element-wise Hessian assembly (per-element fresh tapes, scatter).
 // project=false → raw element Hessians; project=true → PSD-projected.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -207,8 +237,8 @@ static std::pair<double,int> bench(std::function<void()> f)
 // ─────────────────────────────────────────────────────────────────────────────
 int main()
 {
-    printf("%6s %9s %7s %14s %14s %14s\n",
-           "# nV", "nF", "iters", "elem_noproj", "elem_proj", "synth_proj");
+    printf("%6s %9s %7s %14s %14s %14s %14s\n",
+           "# nV", "nF", "iters", "global_sparse", "elem_noproj", "elem_proj", "synth_proj");
 
     for (int n = 2; n <= 256; n *= 2) {
         Eigen::MatrixXd V0; Eigen::MatrixXi F;
@@ -223,7 +253,11 @@ int main()
 
         auto elems = precompute(V0, F);   // rest shapes from unperturbed grid
 
-        auto [t_noproj, iters] = bench([&]{
+        auto [t_global, iters] = bench([&]{
+            auto H = global_sparse_hessian(V, F, elems);
+            g_sink += H.coeff(0,0);
+        });
+        auto [t_noproj, i1] = bench([&]{
             auto H = element_hessian(V, F, elems, /*project=*/false);
             g_sink += H.coeff(0,0);
         });
@@ -236,7 +270,7 @@ int main()
             g_sink += H.coeff(0,0);
         });
 
-        printf("%6d %9d %7d %14.4e %14.4e %14.4e\n",
-               (int)V.rows(), (int)F.rows(), iters, t_noproj, t_proj, t_syn);
+        printf("%6d %9d %7d %14.4e %14.4e %14.4e %14.4e\n",
+               (int)V.rows(), (int)F.rows(), iters, t_global, t_noproj, t_proj, t_syn);
     }
 }
