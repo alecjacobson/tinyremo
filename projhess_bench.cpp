@@ -208,7 +208,7 @@ int main()
     printf("%6s %9s %7s %14s %14s\n",
            "# nV", "nF", "iters", "trivial(s)", "synthetic(s)");
 
-    for (int n = 2; n <= 64; n *= 2) {
+    for (int n = 2; n <= 256; n *= 2) {
         Eigen::MatrixXd V0; Eigen::MatrixXi F;
         make_grid(n, V0, F);
 
