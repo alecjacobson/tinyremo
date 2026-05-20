@@ -205,9 +205,8 @@ static std::pair<double,int> bench(std::function<void()> f)
 // ─────────────────────────────────────────────────────────────────────────────
 int main()
 {
-    printf("%-8s %6s %9s %7s %14s %14s\n",
-           "# grid_n", "nV", "nF", "iters", "trivial(s)", "synthetic(s)");
-    printf("# nV = grid_n^2 (vertices), nF = 2*(grid_n-1)^2 (triangles)\n");
+    printf("%6s %9s %7s %14s %14s\n",
+           "# nV", "nF", "iters", "trivial(s)", "synthetic(s)");
 
     for (int n = 2; n <= 64; n *= 2) {
         Eigen::MatrixXd V0; Eigen::MatrixXi F;
@@ -231,7 +230,7 @@ int main()
             g_sink += H.coeff(0,0);
         });
 
-        printf("%-8d %6d %9d %7d %14.4e %14.4e\n",
-               n, (int)V.rows(), (int)F.rows(), iters, t_tri, t_syn);
+        printf("%6d %9d %7d %14.4e %14.4e\n",
+               (int)V.rows(), (int)F.rows(), iters, t_tri, t_syn);
     }
 }
