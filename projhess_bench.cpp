@@ -100,13 +100,15 @@ static Eigen::VectorXd flatten(const Eigen::MatrixXd& V)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Trivial projected Hessian: per-element fresh tapes, project, scatter
+// Element-wise Hessian assembly (per-element fresh tapes, scatter).
+// project=false → raw element Hessians; project=true → PSD-projected.
 // ─────────────────────────────────────────────────────────────────────────────
 static Eigen::SparseMatrix<double>
-trivial_proj_hessian(const Eigen::MatrixXd& V,
-                     const Eigen::MatrixXi& F,
-                     const std::vector<ElemData>& elems,
-                     double eps = 1e-7)
+element_hessian(const Eigen::MatrixXd& V,
+                const Eigen::MatrixXi& F,
+                const std::vector<ElemData>& elems,
+                bool project = false,
+                double eps = 1e-7)
 {
     using V1 = tinyremo::Var<double>;
 
@@ -123,10 +125,10 @@ trivial_proj_hessian(const Eigen::MatrixXd& V,
 
         tinyremo::Tape<double> t1; tinyremo::Tape<V1> t2;
         auto xl_ad = tinyremo::record_matrix(xl, t1, t2);
-        auto Hi    = tinyremo::hessian(
-                         neohookean_2d(xl_ad, elems[f].Mr_inv, elems[f].A),
-                         xl_ad);
-        auto pHi   = project_psd(Hi, eps);
+        Eigen::MatrixXd Hi = tinyremo::hessian(
+                                 neohookean_2d(xl_ad, elems[f].Mr_inv, elems[f].A),
+                                 xl_ad);
+        if (project) Hi = project_psd(Hi, eps);
 
         for (int a = 0; a < 3; a++)
             for (int b = 0; b < 3; b++)
@@ -134,7 +136,7 @@ trivial_proj_hessian(const Eigen::MatrixXd& V,
                     for (int db = 0; db < 2; db++)
                         triplets.emplace_back(
                             2*F(f,a)+da, 2*F(f,b)+db,
-                            pHi(2*a+da, 2*b+db));
+                            Hi(2*a+da, 2*b+db));
     }
 
     Eigen::SparseMatrix<double> H(2*nV, 2*nV);
@@ -205,8 +207,8 @@ static std::pair<double,int> bench(std::function<void()> f)
 // ─────────────────────────────────────────────────────────────────────────────
 int main()
 {
-    printf("%6s %9s %7s %14s %14s\n",
-           "# nV", "nF", "iters", "trivial(s)", "synthetic(s)");
+    printf("%6s %9s %7s %14s %14s %14s\n",
+           "# nV", "nF", "iters", "elem_noproj", "elem_proj", "synth_proj");
 
     for (int n = 2; n <= 256; n *= 2) {
         Eigen::MatrixXd V0; Eigen::MatrixXi F;
@@ -221,16 +223,20 @@ int main()
 
         auto elems = precompute(V0, F);   // rest shapes from unperturbed grid
 
-        auto [t_tri,  iters] = bench([&]{
-            auto H = trivial_proj_hessian(V, F, elems);
+        auto [t_noproj, iters] = bench([&]{
+            auto H = element_hessian(V, F, elems, /*project=*/false);
             g_sink += H.coeff(0,0);
         });
-        auto [t_syn, _] = bench([&]{
+        auto [t_proj, i2] = bench([&]{
+            auto H = element_hessian(V, F, elems, /*project=*/true);
+            g_sink += H.coeff(0,0);
+        });
+        auto [t_syn, i3] = bench([&]{
             auto H = synthetic_proj_hessian(V, F, elems);
             g_sink += H.coeff(0,0);
         });
 
-        printf("%6d %9d %7d %14.4e %14.4e\n",
-               (int)V.rows(), (int)F.rows(), iters, t_tri, t_syn);
+        printf("%6d %9d %7d %14.4e %14.4e %14.4e\n",
+               (int)V.rows(), (int)F.rows(), iters, t_noproj, t_proj, t_syn);
     }
 }
