@@ -315,7 +315,11 @@ namespace tinyremo
       while (!wl.empty()) {
         auto [i, g] = wl.pop_max();
 
-        if (g == Scalar(0)) continue;
+        // Same guard as grad(): when Scalar=Var<T> a zero primal adjoint still
+        // carries inner-tape second-derivative info, so we must never skip it.
+        if constexpr (std::is_arithmetic_v<Scalar>) {
+          if (g == Scalar(0)) continue;
+        }
         result.emplace(i, g);
 
         const auto& node = (*tape_ptr)[i];
