@@ -285,6 +285,50 @@ TEST_CASE("sparse_grad: variable not in expression is absent or zero")
     CHECK((it == g.end() || it->second == doctest::Approx(0.0)));
 }
 
+TEST_CASE("sparse_grad: zero primal adjoint does not suppress inner tape (nested Var)")
+{
+    // f(x) = x^2 at x=0: outer (first) derivative is 0, but d²f/dx² = 2.
+    // sparse_grad must not skip a node just because its accumulated primal
+    // adjoint is 0 when Scalar=Var<double>: the Var<double> still carries
+    // inner-tape info encoding the second derivative.
+    Tape<double> t1;
+    Tape<V1>     t2;
+    V2 x = record_scalar(0.0, t1, t2);
+    V2 f = x * x;
+
+    auto g_sparse = f.sparse_grad();          // index_map<size_t, V1>
+    auto it = g_sparse.find(x.getIndex());
+    REQUIRE(it != g_sparse.end());            // must not vanish due to zero-skip
+
+    auto inner = it->second.grad();           // d(∂f/∂x) / d(x inner)
+    CHECK(inner[x.getValue().getIndex()] == doctest::Approx(2.0));
+}
+
+TEST_CASE("sparse_grad: no exponential blow-up on repeated-diamond DAG")
+{
+    // Each layer introduces a 4-path DAG (diamond) rooted at x_{k-1}:
+    //   a_k = x_{k-1} + x_{k-1}   (2 refs to x_{k-1})
+    //   b_k = x_{k-1} * x_{k-1}   (2 refs to x_{k-1})
+    //   x_k = a_k + b_k
+    // With m=25 layers the naive recursive traversal would visit x_0
+    // 4^25 ≈ 10^15 times.  The iterative worklist processes each of the
+    // 3m+1 tape entries exactly once, so this must finish in < 1 ms.
+    const int m = 25;
+    Tape<double> t;
+    V1 x = var(1e-6, t);  // small so x_25 ≈ 2^25 * 1e-6 ≈ 33, no overflow
+    V1 node = x;
+    for (int k = 0; k < m; ++k) {
+        V1 a = node + node;
+        V1 b = node * node;
+        node = a + b;
+    }
+    auto g_dense  = node.grad();
+    auto g_sparse = node.sparse_grad();
+    auto it = g_sparse.find(x.getIndex());
+    REQUIRE(it != g_sparse.end());
+    CHECK(it->second == doctest::Approx(g_dense[x.getIndex()]).epsilon(1e-10));
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Second derivatives via nested tapes
 // ─────────────────────────────────────────────────────────────────────────────
