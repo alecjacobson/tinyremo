@@ -27,8 +27,8 @@ Eigen's autodiff does not support sparse Hessians, so for problems like the
 Hessian of a loop of springs, it produces a dense Hessian with quadratic time
 and memory complexity. In contrast,
 tinyremo and TinyAD support sparse Hessians. tinyremo doesn't require coding the
-loss function in any particular way, but it's about 11× slower than TinyAD,
-which requires coding the loss function in a particular scatter gather loop.
+loss function in any particular way, but it's about 10× slower than TinyAD,
+which requires coding the loss function in a particular scatter-gather loop.
 
 ![](hessian-springs.png)
 
