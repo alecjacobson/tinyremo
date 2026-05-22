@@ -133,7 +133,11 @@ namespace tinyremo
       // x + 0 = x, 0 + x = x: skip unary wrapper nodes (e.g. in backward sweeps).
       if( tape_ptr && !other.tape_ptr && other.value == Scalar(0)) return *this;
       if(!tape_ptr &&  other.tape_ptr &&       value == Scalar(0)) return other;
-      if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, Scalar(1), other.index, Scalar(1)), value + other.value); }
+      if(tape_ptr && other.tape_ptr) {
+        // x + x: fold into a single unary node with weight 2 instead of binary.
+        if(index == other.index) return Var(tape_ptr, tape_ptr->push_unary(index, Scalar(2)), value + other.value);
+        return Var(tape_ptr, tape_ptr->push_binary(index, Scalar(1), other.index, Scalar(1)), value + other.value);
+      }
       if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, Scalar(1)), value + other.value); }
       if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, Scalar(1)), value + other.value); }
       return Var(value + other.value);
@@ -160,7 +164,11 @@ namespace tinyremo
       // Only safe when the zero has no inner tape (pure constant, not a tracked zero).
       if( tape_ptr && !other.tape_ptr && other.value == Scalar(0)) return Var(Scalar(0));
       if(!tape_ptr &&  other.tape_ptr &&       value == Scalar(0)) return Var(Scalar(0));
-      if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, other.value, other.index, value), value * other.value); }
+      if(tape_ptr && other.tape_ptr) {
+        // x * x: fold into a single unary node with weight 2x instead of binary.
+        if(index == other.index) return Var(tape_ptr, tape_ptr->push_unary(index, Scalar(2)*value), value * other.value);
+        return Var(tape_ptr, tape_ptr->push_binary(index, other.value, other.index, value), value * other.value);
+      }
       if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, other.value), value * other.value); }
       if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, value), value * other.value); }
       return Var(value * other.value);
@@ -169,9 +177,11 @@ namespace tinyremo
     Var operator/(const Var& other) const
     {
       assert(other.value != Scalar(0));
+      assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
+      // x / 1 = x: skip unary wrapper node.
+      if(tape_ptr && !other.tape_ptr && other.value == Scalar(1)) return *this;
       const Scalar inv  = Scalar(1) / other.value;          // 1/y
       const Scalar ninv2 = -value * inv * inv;              // -x/y²
-      assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
       if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, inv, other.index, ninv2), value * inv); }
       if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, inv), value * inv); }
       if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, ninv2), value * inv); }
@@ -334,8 +344,10 @@ namespace tinyremo
           if (out[i] == Scalar(0)) continue;
         }
         const auto& node = (*tape_ptr)[i];
-        for (int j = 0; j < 2; ++j)
+        for (int j = 0; j < 2; ++j) {
+          if (node.deps[j] == (size_t)i) continue;  // self-loop (leaf/unary slot)
           out[node.deps[j]] += node.weights[j] * out[i];
+        }
       }
     }
 
