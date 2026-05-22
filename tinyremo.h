@@ -13,31 +13,55 @@ namespace tinyremo
 {
   template<typename Key, typename Value> using index_map = std::unordered_map<Key,Value>;
 
-  // A sorted flat-map backed by std::vector. O(k) insert/erase but cache-
-  // friendly and allocation-free for small k.  Used as the sparse_grad
-  // worklist where k (reachable nodes) is typically small (< 32).
-  // Swap for boost::container::flat_map or std::flat_map (C++23) if available.
-  template<typename Key, typename Value, typename Cmp = std::less<Key>>
-  struct flat_map {
+  // Ordered worklist for sparse_grad.  Stays as a sorted flat-vector while
+  // the active set is small (cache-friendly, O(1) pop_max, O(k) insert).
+  // Once it exceeds FlatCapacity it spills to std::map (O(log k) insert and
+  // pop_max), avoiding the O(k) insert cost that causes O(n²) behaviour when
+  // a dense row forces the worklist to grow large.
+  template<typename Key, typename Value,
+           size_t FlatCapacity = 32, typename Cmp = std::less<Key>>
+  struct worklist_map {
     using Entry = std::pair<Key, Value>;
-    std::vector<Entry> v;
-    Cmp cmp{};
 
-    bool empty() const { return v.empty(); }
+    bool empty() const { return spilled ? tree.empty() : flat.empty(); }
 
-    // Returns reference to value for key, inserting Value{} if absent.
     Value& operator[](const Key& k) {
-      auto it = std::lower_bound(v.begin(), v.end(), Entry{k, Value{}},
-                                 [&](const Entry& a, const Entry& b){ return cmp(a.first, b.first); });
-      if (it != v.end() && !cmp(k, it->first) && !cmp(it->first, k))
+      if (spilled) return tree[k];
+      auto it = flat_lb(k);
+      if (it != flat.end() && !cmp(k, it->first) && !cmp(it->first, k))
         return it->second;
-      return v.insert(it, {k, Value{}})->second;
+      if (flat.size() < FlatCapacity)
+        return flat.insert(it, {k, Value{}})->second;
+      spill();
+      return tree[k];
     }
 
-    // Pop the maximum-key entry (back of ascending-sorted vector).
-    Entry pop_max() { Entry e = v.back(); v.pop_back(); return e; }
+    // Pop the maximum-key entry.  O(1) in flat mode, O(log k) in tree mode.
+    Entry pop_max() {
+      if (spilled) {
+        auto it = std::prev(tree.end());
+        Entry e = *it; tree.erase(it); return e;
+      }
+      Entry e = flat.back(); flat.pop_back(); return e;
+    }
 
     void emplace(Key k, Value val) { (*this)[k] = std::move(val); }
+
+  private:
+    std::vector<Entry>      flat;
+    std::map<Key,Value,Cmp> tree;
+    bool spilled = false;
+    Cmp  cmp{};
+
+    auto flat_lb(const Key& k) {
+      return std::lower_bound(flat.begin(), flat.end(), k,
+        [this](const Entry& a, const Key& b){ return cmp(a.first, b); });
+    }
+
+    void spill() {
+      for (auto& [k,v] : flat) tree.emplace(std::move(k), std::move(v));
+      flat.clear(); flat.shrink_to_fit(); spilled = true;
+    }
   };
 
   template<typename Scalar>
@@ -106,6 +130,9 @@ namespace tinyremo
     Var operator+(const Var& other) const
     {
       assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
+      // x + 0 = x, 0 + x = x: skip unary wrapper nodes (e.g. in backward sweeps).
+      if( tape_ptr && !other.tape_ptr && other.value == Scalar(0)) return *this;
+      if(!tape_ptr &&  other.tape_ptr &&       value == Scalar(0)) return other;
       if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, Scalar(1), other.index, Scalar(1)), value + other.value); }
       if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, Scalar(1)), value + other.value); }
       if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, Scalar(1)), value + other.value); }
@@ -115,6 +142,8 @@ namespace tinyremo
     Var operator-(const Var& other) const
     {
       assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
+      // x - 0 = x: skip unary wrapper node.
+      if(tape_ptr && !other.tape_ptr && other.value == Scalar(0)) return *this;
       if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, Scalar(1), other.index, Scalar(-1)), value - other.value); }
       if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, Scalar(1)), value - other.value); }
       if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, Scalar(-1)), value - other.value); }
@@ -124,6 +153,13 @@ namespace tinyremo
     Var operator*(const Var& other) const
     {
       assert(!tape_ptr || !other.tape_ptr || tape_ptr == other.tape_ptr);
+      // x * 1 = x, 1 * x = x: skip unary wrapper nodes (e.g. in backward sweeps).
+      if( tape_ptr && !other.tape_ptr && other.value == Scalar(1)) return *this;
+      if(!tape_ptr &&  other.tape_ptr &&       value == Scalar(1)) return other;
+      // x * 0 = 0, 0 * x = 0: prune zero branches (e.g. leaf self-loop nodes).
+      // Only safe when the zero has no inner tape (pure constant, not a tracked zero).
+      if( tape_ptr && !other.tape_ptr && other.value == Scalar(0)) return Var(Scalar(0));
+      if(!tape_ptr &&  other.tape_ptr &&       value == Scalar(0)) return Var(Scalar(0));
       if(tape_ptr && other.tape_ptr) { return Var(tape_ptr, tape_ptr->push_binary(index, other.value, other.index, value), value * other.value); }
       if(tape_ptr) { return Var(tape_ptr, tape_ptr->push_unary(index, other.value), value * other.value); }
       if(other.tape_ptr) { return Var(other.tape_ptr, other.tape_ptr->push_unary(other.index, value), value * other.value); }
@@ -305,10 +341,9 @@ namespace tinyremo
 
     index_map<size_t, Scalar> sparse_grad() const
     {
-      // Sparse iterative reverse sweep.  flat_map worklist: ascending key
-      // order so pop_max() is O(1); insert is O(k) but cache-friendly for
-      // the small k typical of sparse functions.
-      flat_map<size_t, Scalar> wl;
+      // Sparse iterative reverse sweep.  worklist_map: flat sorted-vector
+      // while the active set is small, spills to std::map beyond FlatCapacity.
+      worklist_map<size_t, Scalar> wl;
       wl[index] = Scalar(1);
 
       index_map<size_t, Scalar> result;
