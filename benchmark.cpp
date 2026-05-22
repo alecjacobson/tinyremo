@@ -106,6 +106,20 @@ std::vector<T> stencil_func(const Eigen::Matrix<T,Eigen::Dynamic,1>& x, int N)
     return F;
 }
 
+// Star function: z = x0 * (x0 + x1 + ... + x_{N-1}).
+// Hessian has a completely dense first row/column and zeros elsewhere.
+// Graph-coloring methods need N colours; our sparse_hessian is still O(N)
+// because ∂z/∂xi = x0 for i≥1 — a single inner-tape leaf — so each of
+// those N sparse_grad calls costs O(1). Only ∂z/∂x0 = 2x0+x1+...+x_{N-1}
+// traverses the full inner sum tree at O(N). Total: O(N).
+template <typename T>
+T star_func(const Eigen::Matrix<T,Eigen::Dynamic,1>& x)
+{
+    T sum = x(0);
+    for (int i = 1; i < x.size(); i++) sum = sum + x(i);
+    return x(0) * sum;
+}
+
 // Circular ratio (x_i-x_j)/(x_i+x_j) — exercises operator- and operator/.  Sparse Hessian.
 template <typename T>
 T ratio_func(const Eigen::Matrix<T,Eigen::Dynamic,1>& x, int N)
@@ -191,6 +205,7 @@ static Eigen::VectorXd llt_x(int N)   { Eigen::VectorXd x(N);   for(int i=0;i<N;
 static Eigen::VectorXd rosen_x(int N) { Eigen::VectorXd x(N);   for(int i=0;i<N;i++) x(i)=1.0+0.1*std::sin(i+1.0); return x; }
 static Eigen::VectorXd trig_x(int N)  { Eigen::VectorXd x(N);   for(int i=0;i<N;i++) x(i)=0.5+0.3*std::sin(i+1.0); return x; }
 static Eigen::VectorXd ratio_x(int N) { Eigen::VectorXd x(N);   for(int i=0;i<N;i++) x(i)=1.0+0.5*std::sin(i+1.0); return x; }
+static Eigen::VectorXd star_x(int N)  { Eigen::VectorXd x(N);   for(int i=0;i<N;i++) x(i)=1.0+0.1*std::sin(i+1.0); return x; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Output
@@ -331,6 +346,10 @@ int main()
     { bool ok=true; for (int N=4; N<=256 && ok; N*=2)
         ok = bench_hessian("ratio/hessian",      N,   ratio_x(N), [N](auto& x){ return ratio_func(x,N);     }, 0.5); }
     printf("\n");
+    // star: dense first row/col — graph-coloring fails, dense hessian is O(N^2)
+    { bool ok=true; for (int N=4; N<=512 && ok; N*=2)
+        ok = bench_hessian("star/hessian",        N,   star_x(N),  [](auto& x)  { return star_func(x);       }, 0.5); }
+    printf("\n");
 
     // ── sparse_hessian() — auto-skip above 0.5 s/call ────────────────────────
     // llt omitted: its Hessian is fully dense (all vars coupled through A).
@@ -346,6 +365,11 @@ int main()
     printf("\n");
     { bool ok=true; for (int N=4; N<=512 && ok; N*=2)
         ok = bench_sparse_hessian("ratio/sparse_hessian",      N,   ratio_x(N), [N](auto& x){ return ratio_func(x,N);     }, 0.5); }
+    printf("\n");
+    // star: dense first row/col — graph-coloring would need N colours, but
+    // sparse_hessian is O(N) because all off-diagonal rows are a single leaf.
+    { bool ok=true; for (int N=4; N<=16384 && ok; N*=2)
+        ok = bench_sparse_hessian("star/sparse_hessian",        N,   star_x(N),  [](auto& x)  { return star_func(x);       }, 0.5); }
     printf("\n");
     // Random graph: irregular (non-banded) sparsity, large N, ~4 edges/node
     { bool ok=true;
