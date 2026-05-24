@@ -925,3 +925,114 @@ TEST_CASE("spring: sparse hessian has correct sparsity (N=6, bandwidth 2)")
         for (int dof_b : {4, 5})
             CHECK(std::abs(H.coeff(dof_a, dof_b)) < TOL);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Chain recurrence tests
+// f(x) = x(0) * s,  s(i) = a_i * s(i-1) + x(i),  s(0) = 0.
+// Hessian: H[0,k] = H[k,0] = ∂s/∂x(k); H[i,j] = 0 for i,j ≥ 1.
+// Outer tape is O(N); sparse_hessian is O(N^2) because the non-unit backward
+// weights a_i push unary nodes onto the inner tape at each step.
+// ─────────────────────────────────────────────────────────────────────────────
+
+template <typename T>
+T chain_func(const Eigen::Matrix<T, Eigen::Dynamic, 1>& x)
+{
+    T s(0);
+    for (int i = 1; i < (int)x.size(); i++) {
+        double a = 0.5 + 0.3 * std::sin((double)i);
+        s = T(a) * s + x(i);
+    }
+    return x(0) * s;
+}
+
+static Eigen::VectorXd chain_init(int N)
+{
+    Eigen::VectorXd x(N);
+    for (int i = 0; i < N; i++) x(i) = 1.0 + 0.1 * std::sin(i + 1.0);
+    return x;
+}
+
+TEST_CASE("chain: gradient matches FD (N=5)")
+{
+    const int N = 5;
+    Eigen::VectorXd xd = chain_init(N);
+    auto f = [](const Eigen::VectorXd& x) { return chain_func(x); };
+
+    Tape<double> t;
+    auto x = record_matrix(xd, t);
+    auto [g] = gradient(chain_func(x), x);
+
+    CHECK((g - fd_grad(xd, f)).cwiseAbs().maxCoeff() < FD_GRAD_TOL);
+}
+
+TEST_CASE("chain: dense hessian matches FD (N=5)")
+{
+    const int N = 5;
+    Eigen::VectorXd xd = chain_init(N);
+    auto f = [](const Eigen::VectorXd& x) { return chain_func(x); };
+
+    Tape<double> t1; Tape<V1> t2;
+    auto x = record_matrix(xd, t1, t2);
+    auto H = hessian(chain_func(x), x);
+
+    CHECK((H - fd_hess(xd, f)).cwiseAbs().maxCoeff() < FD_HESS_TOL);
+}
+
+TEST_CASE("chain: hessian is symmetric (N=6)")
+{
+    const int N = 6;
+    Eigen::VectorXd xd = chain_init(N);
+
+    Tape<double> t1; Tape<V1> t2;
+    auto x = record_matrix(xd, t1, t2);
+    auto H = hessian(chain_func(x), x);
+
+    CHECK((H - H.transpose()).norm() < TOL);
+}
+
+TEST_CASE("chain: H[i,j]=0 for i,j>=1 (f bilinear in x0 vs x1..xN-1)")
+{
+    // s is linear in x(1)..x(N-1), so d²f/dx(i)dx(j) = 0 for i,j >= 1.
+    const int N = 8;
+    Eigen::VectorXd xd = chain_init(N);
+
+    Tape<double> t1; Tape<V1> t2;
+    auto x = record_matrix(xd, t1, t2);
+    auto H = hessian(chain_func(x), x);
+
+    for (int i = 1; i < N; i++)
+        for (int j = 1; j < N; j++)
+            CHECK(std::abs(H(i, j)) < TOL);
+}
+
+TEST_CASE("chain: sparse hessian matches dense (N=6)")
+{
+    const int N = 6;
+    Eigen::VectorXd xd = chain_init(N);
+
+    Tape<double> td1; Tape<V1> td2;
+    auto Xd = record_matrix(xd, td1, td2);
+    auto Hd = hessian(chain_func(Xd), Xd);
+
+    Tape<double> ts1; Tape<V1> ts2;
+    auto Xs = record_matrix(xd, ts1, ts2);
+    auto Hs = sparse_hessian(chain_func(Xs), Xs);
+
+    CHECK((Eigen::MatrixXd(Hs) - Hd).norm() < TOL);
+}
+
+TEST_CASE("chain: outer tape size is linear in N")
+{
+    // Each recurrence step adds 2 outer-tape nodes (unary + binary);
+    // step 1 adds 0 (s=0 shortcut); final x(0)*s adds 1. Plus N from
+    // record_matrix → total = 3N-3, so size(2N)/size(N) → 2 as N grows.
+    auto outer_size = [](int N) -> size_t {
+        Tape<double> t1; Tape<V1> t2;
+        auto x = record_matrix(chain_init(N), t1, t2);
+        chain_func(x);
+        return t2.size();
+    };
+    size_t s100 = outer_size(100);
+    size_t s200 = outer_size(200);
+    CHECK((double)s200 / (double)s100 == doctest::Approx(2.0).epsilon(0.05));
+}

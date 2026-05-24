@@ -120,6 +120,18 @@ T star_func(const Eigen::Matrix<T,Eigen::Dynamic,1>& x)
     return x(0) * sum;
 }
 
+template <typename T>
+T chain_func(const Eigen::Matrix<T,Eigen::Dynamic,1>& x)
+{
+    T s(0);
+    T a(2);
+    for (int i = 1; i < (int)x.size(); i++)
+    {
+        s = s * a + x(i);
+    }
+    return x(0) * s;
+}
+
 // Circular ratio (x_i-x_j)/(x_i+x_j) — exercises operator- and operator/.  Sparse Hessian.
 template <typename T>
 T ratio_func(const Eigen::Matrix<T,Eigen::Dynamic,1>& x, int N)
@@ -206,6 +218,7 @@ static Eigen::VectorXd rosen_x(int N) { Eigen::VectorXd x(N);   for(int i=0;i<N;
 static Eigen::VectorXd trig_x(int N)  { Eigen::VectorXd x(N);   for(int i=0;i<N;i++) x(i)=0.5+0.3*std::sin(i+1.0); return x; }
 static Eigen::VectorXd ratio_x(int N) { Eigen::VectorXd x(N);   for(int i=0;i<N;i++) x(i)=1.0+0.5*std::sin(i+1.0); return x; }
 static Eigen::VectorXd star_x(int N)  { Eigen::VectorXd x(N);   for(int i=0;i<N;i++) x(i)=1.0+0.1*std::sin(i+1.0); return x; }
+static Eigen::VectorXd chain_x(int N) { Eigen::VectorXd x(N);   for(int i=0;i<N;i++) x(i)=1.0+0.1*std::sin(i+1.0); return x; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Output
@@ -319,6 +332,10 @@ int main()
         bench_grad("rand_spring/grad", 2*N, g.x, [&g](auto& x){ return random_spring_energy(x, g.edges); });
     }
     printf("\n");
+    // chain: O(N) tape, O(N) grad
+    { bool ok=true; for (int N=4; N<=16384 && ok; N*=2)
+        ok = bench_grad("chain/grad",     N,   chain_x(N),  [](auto& x)  { return chain_func(x);       }, 0.5); }
+    printf("\n");
 
     // ── sparse_jacobian() ─────────────────────────────────────────────────────
     // stencil: each of N outputs depends on 2 inputs → bidiagonal J (2 nz/row).
@@ -350,6 +367,10 @@ int main()
     { bool ok=true; for (int N=4; N<=512 && ok; N*=2)
         ok = bench_hessian("star/hessian",        N,   star_x(N),  [](auto& x)  { return star_func(x);       }, 0.5); }
     printf("\n");
+    // chain: same dense-first-row structure, dense hessian is O(N^2)
+    { bool ok=true; for (int N=4; N<=512 && ok; N*=2)
+        ok = bench_hessian("chain/hessian",       N,   chain_x(N), [](auto& x)  { return chain_func(x);      }, 0.5); }
+    printf("\n");
 
     // ── sparse_hessian() — auto-skip above 0.5 s/call ────────────────────────
     // llt omitted: its Hessian is fully dense (all vars coupled through A).
@@ -370,6 +391,15 @@ int main()
     // sparse_hessian is O(N) because all off-diagonal rows are a single leaf.
     { bool ok=true; for (int N=4; N<=16384 && ok; N*=2)
         ok = bench_sparse_hessian("star/sparse_hessian",        N,   star_x(N),  [](auto& x)  { return star_func(x);       }, 0.5); }
+    printf("\n");
+    // chain: despite O(N) outer tape, sparse_hessian is O(N^2).
+    // The outer backward pass multiplies the running adjoint by V1(a_i) at each
+    // step; since a_i ≠ 1, this calls push_unary on the inner tape instead of
+    // hitting the weight-1 shortcut, so x(k)'s inner adjoint is a chain of
+    // O(N-k) nodes.  Summing over k gives O(N^2).  Contrast with star, where
+    // all weights are 1 and every off-diagonal row reuses the same single leaf.
+    { bool ok=true; for (int N=4; N<=65536&& ok; N*=2)
+        ok = bench_sparse_hessian("chain/sparse_hessian",       N,   chain_x(N), [](auto& x)  { return chain_func(x);      }, 0.5); }
     printf("\n");
     // Random graph: irregular (non-banded) sparsity, large N, ~4 edges/node
     { bool ok=true;
